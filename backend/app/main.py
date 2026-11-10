@@ -6,7 +6,7 @@ from app.database import engine
 from app.models.db_models import Base
 
 # Import your API router
-from app.api import router
+from app.api.complaints import router
 
 # Automatically create all tables in PostgreSQL on startup
 Base.metadata.create_all(bind=engine)

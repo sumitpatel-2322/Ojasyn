@@ -7,14 +7,14 @@ import pdfplumber  # Replaced fitz for tabular data extraction
 import pytesseract
 from PIL import Image
 
-from app.schemas import ChatRequest, ChatResponse
+from app.models.schemas.complaints import ChatRequest, ChatResponse
 from app.models.complaint import ComplaintState, ChatMessage, Document, AIAnalysis
 from app.models.enums import MessageRole, ComplaintStatus, ComplaintSource, DocumentType, Severity, Priority
 from app.graph.workflow import graph
 
 # Database imports
 from app.database import SessionLocal
-from app.models.db_models import DBComplaint, DBChatMessage
+from app.models.domain.db_models import DBComplaint, DBChatMessage
 
 router = APIRouter()
 

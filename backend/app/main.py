@@ -3,10 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Import database engine and models
 from app.database import engine
-from app.models.db_models import Base
+from app.models.domain.db_models import Base
 
 # Import your API router
 from app.api.complaints import router
+from app.api.auth import router as auth_router
+from app.api.batches import router as batches_router
+from app.api.production import router as production_router
+from app.api.investigations import router as investigations_router
 
 # Automatically create all tables in PostgreSQL on startup
 Base.metadata.create_all(bind=engine)
@@ -24,6 +28,10 @@ app.add_middleware(
 
 # Mount the routes we created in api.py
 app.include_router(router, prefix="/api")
+app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(batches_router,prefix="/api/batches", tags=["Batch Management"])
+app.include_router(production_router, prefix="/api/production", tags=["Production & Documents"])
+app.include_router(investigations_router, prefix="/api/investigations", tags=["QA Investigations"])
 
 @app.get("/")
 def read_root():

@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { commitComplaint } from '../store/complaintSlice';
 
 // Helper component for Inputs with Blink Animation & Conditional Hiding
-const Field = ({ label, value, isMissing = false, isMandatory = false, hasExtractionRun, type = "text", icon = null, bg = "#f8fafc", textColor = "#0f172a" }) => {
+const Field = ({ label, value, isMissing = false, isMandatory = false, hasExtractionRun, type = "text", icon = null, bg = "var(--c-111e30)", textColor = "var(--c-f2f5fa)" }) => {
     const prevValueRef = useRef(value);
     const [isAnimating, setIsAnimating] = useState(false);
 
@@ -25,12 +25,12 @@ const Field = ({ label, value, isMissing = false, isMandatory = false, hasExtrac
     const placeholderText = (hasExtractionRun && !value) ? "Not provided" : "Awaiting AI extraction...";
     
     // Goal 4: Feedback effect on change
-    const currentBg = isAnimating ? '#dcfce3' : bg;
-    const currentBorder = isAnimating ? '#22c55e' : (isMissing ? '#ef5350' : '#cbd5e1');
+    const currentBg = isAnimating ? 'var(--c-183b38)' : bg;
+    const currentBorder = isAnimating ? 'var(--c-65b69b)' : (isMissing ? 'var(--c-ef5350)' : 'var(--c-3a4b65)');
 
     return (
         <div style={{ marginBottom: '20px', width: '100%' }}>
-            <label style={{ display: 'block', fontWeight: '700', fontSize: '13px', marginBottom: '8px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            <label style={{ display: 'block', fontWeight: '700', fontSize: '13px', marginBottom: '8px', color: 'var(--c-b2bfd0)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {label}
             </label>
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -53,12 +53,12 @@ const Field = ({ label, value, isMissing = false, isMandatory = false, hasExtrac
                         fontWeight: value ? '500' : '400',
                         boxSizing: 'border-box',
                         outline: 'none',
-                        boxShadow: isAnimating ? '0 0 0 3px rgba(34, 197, 94, 0.2)' : '0 1px 2px rgba(0,0,0,0.02)',
+                        boxShadow: isAnimating ? '0 0 0 3px rgba(101, 182, 155, 0.16)' : '0 1px 2px rgba(0,0,0,0.02)',
                         transition: 'all 0.4s ease-out',
                     }}
                 />
                 {icon && (
-                    <span style={{ position: 'absolute', right: '16px', color: '#94a3b8', fontSize: '16px' }}>
+                    <span style={{ position: 'absolute', right: '16px', color: 'var(--c-96a5ba)', fontSize: '16px' }}>
                         {icon}
                     </span>
                 )}
@@ -68,7 +68,7 @@ const Field = ({ label, value, isMissing = false, isMandatory = false, hasExtrac
 };
 
 // Helper component for TextAreas with Blink Animation & Conditional Hiding
-const TextAreaField = ({ label, value, isMissing = false, isMandatory = false, hasExtractionRun, rows = 4, bg = "#f8fafc", textColor = "#0f172a" }) => {
+const TextAreaField = ({ label, value, isMissing = false, isMandatory = false, hasExtractionRun, rows = 4, bg = "var(--c-111e30)", textColor = "var(--c-f2f5fa)" }) => {
     const prevValueRef = useRef(value);
     const [isAnimating, setIsAnimating] = useState(false);
 
@@ -86,12 +86,12 @@ const TextAreaField = ({ label, value, isMissing = false, isMandatory = false, h
     }
 
     const placeholderText = (hasExtractionRun && !value) ? "Not provided" : "Awaiting AI extraction...";
-    const currentBg = isAnimating ? '#dcfce3' : bg;
-    const currentBorder = isAnimating ? '#22c55e' : (isMissing ? '#ef5350' : '#cbd5e1');
+    const currentBg = isAnimating ? 'var(--c-183b38)' : bg;
+    const currentBorder = isAnimating ? 'var(--c-65b69b)' : (isMissing ? 'var(--c-ef5350)' : 'var(--c-3a4b65)');
 
     return (
         <div style={{ marginBottom: '20px', width: '100%' }}>
-            <label style={{ display: 'block', fontWeight: '700', fontSize: '13px', marginBottom: '8px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            <label style={{ display: 'block', fontWeight: '700', fontSize: '13px', marginBottom: '8px', color: 'var(--c-b2bfd0)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {label}
             </label>
             <textarea 
@@ -113,7 +113,7 @@ const TextAreaField = ({ label, value, isMissing = false, isMandatory = false, h
                     lineHeight: '1.5',
                     boxSizing: 'border-box', 
                     outline: 'none', 
-                    boxShadow: isAnimating ? '0 0 0 3px rgba(34, 197, 94, 0.2)' : '0 1px 2px rgba(0,0,0,0.02)',
+                    boxShadow: isAnimating ? '0 0 0 3px rgba(101, 182, 155, 0.16)' : '0 1px 2px rgba(0,0,0,0.02)',
                     transition: 'all 0.4s ease-out',
                 }} 
             />
@@ -143,11 +143,11 @@ const ComplaintForm = () => {
         if (canCommit && !isCommitting) dispatch(commitComplaint());
     };
 
-    let badgeColor = '#d97706'; let badgeBg = '#fef3c7'; let badgeBorder = '#fde68a';
+    let badgeColor = 'var(--c-f0b45c)'; let badgeBg = 'var(--c-3a3020)'; let badgeBorder = 'var(--c-80643a)';
     if (displayStatus === 'Ready to Commit') { 
-        badgeColor = '#059669'; badgeBg = '#d1fae5'; badgeBorder = '#a7f3d0';
+        badgeColor = 'var(--c-55d6ac)'; badgeBg = 'var(--c-153b35)'; badgeBorder = 'var(--c-286b5d)';
     } else if (isCommitted) { 
-        badgeColor = '#4f46e5'; badgeBg = '#e0e7ff'; badgeBorder = '#c7d2fe';
+        badgeColor = 'var(--c-7968b8)'; badgeBg = 'var(--c-29234a)'; badgeBorder = 'var(--c-6655a0)';
     }
 
     const isMissing = (key) => validation_errors.includes(`${key}`) || ai_analysis?.missing_fields?.includes(key);
@@ -160,29 +160,12 @@ const ComplaintForm = () => {
     const showSection3 = shouldShow(activeComplaint?.complaint_category, true) || shouldShow(activeComplaint?.event_date, false) || shouldShow(activeComplaint?.originating_site_block, false) || shouldShow(activeComplaint?.impacted_non_product_material, false) || shouldShow(activeComplaint?.description, true);
 
     return (
-        <div style={{ padding: '36px 40px', overflowY: 'auto', height: '100%', backgroundColor: '#ffffff', fontFamily: '"Inter", sans-serif' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #f1f5f9', paddingBottom: '24px', marginBottom: '32px' }}>
-                <div>
-                    <h2 style={{ margin: '0 0 6px 0', fontSize: '26px', fontWeight: '800', color: '#0f172a', letterSpacing: '-0.5px' }}>Log Customer Complaint</h2>
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '15px' }}>API & FDF Quality Assurance Module</p>
-                </div>
-                <span style={{ 
-                    padding: '8px 16px', 
-                    borderRadius: '8px', 
-                    fontSize: '14px', 
-                    fontWeight: '700',
-                    backgroundColor: badgeBg, 
-                    color: badgeColor,
-                    border: `1px solid ${badgeBorder}`
-                }}>
-                    {displayStatus}
-                </span>
-            </div>
+        <div style={{ padding: '24px 32px 32px', overflowY: 'visible', minHeight: '100%', backgroundColor: 'var(--c-172438)', fontFamily: '"Inter", sans-serif' }}>
+            {/* Title and complaint status are displayed once in the workspace header. */}
 
             {/* Validation Alerts */}
             {(validation_errors?.length > 0 || ai_analysis?.missing_fields?.length > 0) && (
-                <div style={{ backgroundColor: '#fef2f2', color: '#b91c1c', padding: '20px', borderRadius: '10px', marginBottom: '32px', fontSize: '15px', border: '1px solid #fca5a5' }}>
+                <div style={{ backgroundColor: 'var(--c-39252e)', color: 'var(--c-f2a3ad)', padding: '20px', borderRadius: '10px', marginBottom: '32px', fontSize: '15px', border: '1px solid var(--c-80505d)' }}>
                     <strong style={{ display: 'block', marginBottom: '8px', fontSize: '16px' }}>Requires Information:</strong>
                     <ul style={{ margin: '0', paddingLeft: '24px', lineHeight: '1.6' }}>
                         {validation_errors?.map((err, i) => <li key={`val-${i}`}>{err}</li>)}
@@ -196,7 +179,7 @@ const ComplaintForm = () => {
                 {/* 1. ORIGIN & CUSTOMER DETAILS */}
                 {showSection1 && (
                     <div>
-                        <h3 style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '12px', color: '#64748b', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: '800', marginBottom: '24px' }}>1. Origin & Customer Details</h3>
+                        <h3 style={{ borderBottom: '2px solid var(--c-30415a)', paddingBottom: '12px', color: 'var(--c-aab7c9)', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: '800', marginBottom: '24px' }}>1. Origin & Customer Details</h3>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 28px' }}>
                             <Field label="Complaint Source" value={activeComplaint?.source} hasExtractionRun={hasExtractionRun} />
                             <Field label="Customer Name" value={activeComplaint?.customer_name} hasExtractionRun={hasExtractionRun} />
@@ -209,7 +192,7 @@ const ComplaintForm = () => {
                 {/* 2. PRODUCT & BATCH IDENTIFICATION */}
                 {showSection2 && (
                     <div>
-                        <h3 style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '12px', color: '#64748b', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: '800', marginBottom: '24px' }}>2. Product & Batch Identification</h3>
+                        <h3 style={{ borderBottom: '2px solid var(--c-30415a)', paddingBottom: '12px', color: 'var(--c-aab7c9)', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: '800', marginBottom: '24px' }}>2. Product & Batch Identification</h3>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 28px' }}>
                             <Field label="Product Name" value={activeComplaint?.product_name} isMissing={isMissing("Product Name is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} />
                             <Field label="Product Strength/Grade" value={activeComplaint?.strength} hasExtractionRun={hasExtractionRun} />
@@ -227,7 +210,7 @@ const ComplaintForm = () => {
                 {/* 3. COMPLAINT DETAILS */}
                 {showSection3 && (
                     <div>
-                        <h3 style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '12px', color: '#64748b', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: '800', marginBottom: '24px' }}>3. Complaint Details & Facility Impact</h3>
+                        <h3 style={{ borderBottom: '2px solid var(--c-30415a)', paddingBottom: '12px', color: 'var(--c-aab7c9)', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: '800', marginBottom: '24px' }}>3. Complaint Details & Facility Impact</h3>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 28px' }}>
                             <Field label="Complaint Type/Category" value={activeComplaint?.complaint_category} isMissing={isMissing("Complaint Category is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} />
                             <Field label="Event Date" value={activeComplaint?.event_date} hasExtractionRun={hasExtractionRun} icon="📅" />
@@ -240,40 +223,40 @@ const ComplaintForm = () => {
 
                 {/* 4. INITIAL ASSESSMENT & PRIORITY (AI Section) */}
                 <div style={{ 
-                    backgroundColor: '#f8fafc',
-                    backgroundImage: 'linear-gradient(to bottom right, #f4f8ff, #ebf4ff)',
-                    border: '1px solid #bfdbfe',
+                    backgroundColor: 'var(--c-111e30)',
+                    backgroundImage: 'linear-gradient(135deg, var(--c-1b2440) 0%, var(--c-17243a) 55%, var(--c-172b3b) 100%)',
+                    border: '1px solid var(--c-52617a)',
                     borderRadius: '16px',
                     padding: '32px',
                     marginTop: '8px',
                     boxShadow: '0 10px 15px -3px rgba(59, 130, 246, 0.08), 0 4px 6px -2px rgba(59, 130, 246, 0.04)'
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '28px', borderBottom: '2px solid #bfdbfe', paddingBottom: '16px' }}>
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style={{ color: '#2563eb' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '28px', borderBottom: '1px solid var(--c-52617a)', paddingBottom: '16px' }}>
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style={{ color: 'var(--c-a99ade)' }}>
                             <path d="M19.0011 5.43851L20.8122 6.64585L19.0011 7.85319L17.7938 9.66432L16.5864 7.85319L14.7753 6.64585L16.5864 5.43851L17.7938 3.62738L19.0011 5.43851ZM8.5 2L10.9701 7.02985L16 9.5L10.9701 11.9701L8.5 17L6.02985 11.9701L1 9.5L6.02985 7.02985L8.5 2ZM8.5 5.868L7.14083 8.63217L4.37666 9.99133L7.14083 11.3505L8.5 14.1147L9.85917 11.3505L12.6233 9.99133L9.85917 8.63217L8.5 5.868ZM19.0011 14.3357L20.8122 15.543L19.0011 16.7503L17.7938 18.5615L16.5864 16.7503L14.7753 15.543L16.5864 14.3357L17.7938 12.5245L19.0011 14.3357Z"></path>
                         </svg>
-                        <h3 style={{ margin: 0, color: '#1e3a8a', fontSize: '15px', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: '800' }}>
+                        <h3 style={{ margin: 0, color: 'var(--c-d9d2f1)', fontSize: '15px', textTransform: 'uppercase', letterSpacing: '1.2px', fontWeight: '800' }}>
                             AI Risk Assessment & Priority
                         </h3>
                     </div>
                     
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 28px' }}>
-                        <Field label="Initial Severity" value={ai_analysis?.severity?.toUpperCase()} isMissing={isMissing("Severity assessment is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="#ffffff" textColor="#1e3a8a" icon="▼" />
-                        <Field label="Priority" value={ai_analysis?.priority?.toUpperCase()} isMissing={isMissing("Priority assessment is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="#ffffff" textColor="#1e3a8a" icon="▼" />
+                        <Field label="Initial Severity" value={ai_analysis?.severity?.toUpperCase()} isMissing={isMissing("Severity assessment is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="var(--c-172438)" textColor="var(--c-d9d2f1)" icon="▼" />
+                        <Field label="Priority" value={ai_analysis?.priority?.toUpperCase()} isMissing={isMissing("Priority assessment is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="var(--c-172438)" textColor="var(--c-d9d2f1)" icon="▼" />
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <TextAreaField label="AI Summary" value={ai_analysis?.summary} isMissing={isMissing("Summary is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="#ffffff" textColor="#334155" rows={3} />
-                        <TextAreaField label="Detailed Risk Assessment" value={ai_analysis?.risk_assessment} isMissing={isMissing("Risk Assessment is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="#ffffff" textColor="#334155" rows={5} />
-                        <Field label="Recommended Next Action" value={ai_analysis?.recommended_action} isMissing={isMissing("Recommended Action is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="#ffffff" textColor="#1d4ed8" />
+                        <TextAreaField label="AI Summary" value={ai_analysis?.summary} isMissing={isMissing("Summary is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="var(--c-172438)" textColor="var(--c-d6deea)" rows={3} />
+                        <TextAreaField label="Detailed Risk Assessment" value={ai_analysis?.risk_assessment} isMissing={isMissing("Risk Assessment is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="var(--c-172438)" textColor="var(--c-d6deea)" rows={5} />
+                        <Field label="Recommended Next Action" value={ai_analysis?.recommended_action} isMissing={isMissing("Recommended Action is required.")} isMandatory={true} hasExtractionRun={hasExtractionRun} bg="var(--c-172438)" textColor="var(--c-b8a8e8)" />
                     </div>
                 </div>
             </div>
 
             {/* Commit Action / Read-Only State Disclaimer */}
-            <div style={{ borderTop: '2px solid #f1f5f9', paddingTop: '24px', textAlign: 'center' }}>
+            <div style={{ borderTop: '2px solid var(--c-30415a)', paddingTop: '24px', textAlign: 'center' }}>
                 {isCommitted ? (
-                    <div style={{ color: '#4f46e5', fontSize: '14px', fontWeight: '700' }}>
+                    <div style={{ color: 'var(--c-7968b8)', fontSize: '14px', fontWeight: '700' }}>
                         ✅ This complaint has been committed to the QMS Ledger.
                     </div>
                 ) : (
@@ -289,15 +272,15 @@ const ComplaintForm = () => {
                                 fontSize: '15px',
                                 fontWeight: '700',
                                 letterSpacing: '0.3px',
-                                color: '#ffffff',
-                                backgroundColor: (!canCommit || isCommitting) ? '#cbd5e1' : '#4f46e5',
+                                color: 'var(--c-172438)',
+                                backgroundColor: (!canCommit || isCommitting) ? 'var(--c-3a4b65)' : 'var(--c-7968b8)',
                                 cursor: (!canCommit || isCommitting) ? 'not-allowed' : 'pointer',
                                 transition: 'background-color 0.2s',
                             }}
                         >
                             {isCommitting ? 'Committing...' : 'Commit to QMS Ledger'}
                         </button>
-                        <p style={{ margin: '12px 0 0 0', color: '#64748b', fontSize: '13px', fontWeight: '500' }}>
+                        <p style={{ margin: '12px 0 0 0', color: 'var(--c-aab7c9)', fontSize: '13px', fontWeight: '500' }}>
                             {canCommit
                                 ? 'Form is locked for manual editing. Use the chat to make further corrections before committing.'
                                 : 'Form is locked for manual editing. Resolve the items above (via chat) before this complaint can be committed.'}

@@ -1,0 +1,373 @@
+/* AUTHENTICATION MODAL */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(3, 6, 16, 0.78);
+  backdrop-filter: blur(12px);
+}
+
+.auth-modal {
+  position: relative;
+  width: min(100%, 560px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 34px;
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 24px;
+  background: linear-gradient(155deg, var(--c-19213a) 0%, var(--c-10172a) 58%, var(--c-0c1222) 100%);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58), 0 0 45px rgba(128, 85, 245, 0.14);
+  color: var(--c-f5f5ff);
+}
+
+.auth-close {
+  position: absolute;
+  top: 15px;
+  right: 17px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--c-35405b);
+  border-radius: 10px;
+  background: var(--c-202a42);
+  color: var(--c-d9d7ee);
+  font-size: 21px;
+  cursor: pointer;
+}
+
+.auth-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  margin-bottom: 20px;
+  font-size: 24px;
+  background: linear-gradient(135deg, var(--c-a78bfa), var(--c-6741e8));
+  box-shadow: 0 8px 28px rgba(124, 87, 255, 0.28);
+}
+
+.auth-modal h2 {
+  font-size: 27px;
+  margin-bottom: 8px;
+  letter-spacing: -0.7px;
+}
+
+.auth-subtitle {
+  color: var(--c-aeb8d0);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 25px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 15px;
+}
+
+.auth-field {
+  display: grid;
+  gap: 8px;
+  color: var(--c-dce1f2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-field input,
+.auth-field select {
+  width: 100%;
+  padding: 14px 15px;
+  border-radius: 11px;
+  outline: none;
+  border: 1px solid var(--c-35415e);
+  background: var(--c-0c1427);
+  color: var(--c-f5f5ff);
+  font: inherit;
+  font-size: 14px;
+  transition: 0.2s;
+}
+
+.auth-field input:focus,
+.auth-field select:focus,
+.auth-field textarea:focus {
+  border-color: var(--c-9875ff);
+  box-shadow: 0 0 0 3px rgba(128, 85, 245, 0.15);
+}
+
+.chemist-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid var(--c-35415e);
+  border-radius: 11px;
+  background: rgba(128, 85, 245, 0.08);
+  color: var(--c-f5f5ff);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chemist-toggle input {
+  width: 17px;
+  height: 17px;
+  accent-color: #7652B5;
+}
+
+.chemist-fields {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 14px;
+  background: rgba(128, 85, 245, 0.055);
+}
+
+.chemist-fields-title {
+  margin: 0;
+  color: var(--c-b69cff);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.chemist-address {
+  min-height: 82px;
+  resize: vertical;
+  width: 100%;
+  padding: 13px 15px;
+  border-radius: 11px;
+  outline: none;
+  border: 1px solid var(--c-35415e);
+  background: var(--c-0c1427);
+  color: var(--c-f5f5ff);
+  font: inherit;
+  font-size: 14px;
+}
+
+.auth-submit {
+  margin-top: 5px;
+  padding: 15px;
+  border: 0;
+  border-radius: 12px;
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  background: linear-gradient(110deg, var(--c-9971ff), var(--c-6744e9));
+  box-shadow: 0 9px 26px rgba(124, 87, 255, 0.22);
+}
+
+.auth-switch {
+  margin-top: 21px;
+  text-align: center;
+  color: var(--c-aeb8d0);
+  font-size: 13px;
+}
+
+.auth-switch button,
+.auth-forgot {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-b69cff);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-forgot {
+  justify-self: end;
+  font-size: 12px;
+}
+
+.auth-notice {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(128, 85, 245, 0.12);
+  color: var(--c-d5c8ff);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.portal-choice-list {
+  display: grid;
+  gap: 13px;
+  margin-top: 8px;
+}
+
+.portal-choice {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 17px;
+  border: 1px solid var(--c-35415e);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--c-f5f5ff);
+  text-align: left;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.portal-choice:hover {
+  transform: translateY(-2px);
+  border-color: var(--c-9875ff);
+  background: rgba(128, 85, 245, 0.09);
+}
+
+.portal-choice-icon {
+  width: 43px;
+  height: 43px;
+  flex: 0 0 43px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(128, 85, 245, 0.14);
+  color: var(--c-b69cff);
+  font-size: 23px;
+}
+
+.employee-choice .portal-choice-icon {
+  background: rgba(66, 213, 161, 0.12);
+  color: #55d6ac;
+}
+
+.portal-choice-copy {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+}
+
+.portal-choice-copy strong {
+  font-size: 15px;
+}
+
+.portal-choice-copy small {
+  color: var(--c-aeb8d0);
+  font-size: 12px;
+  line-height: 1.55;
+  font-weight: 400;
+}
+
+.portal-choice-arrow {
+  color: var(--c-b69cff);
+  font-size: 22px;
+}
+
+.password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input-wrap input {
+  padding-right: 65px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--c-b69cff);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-back {
+  display: block;
+  margin: 18px auto 0;
+  border: 0;
+  background: none;
+  color: var(--c-b69cff);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Light theme overrides for Auth Modal */
+.qms-app[data-theme="light"] .auth-overlay {
+  background: rgba(31, 41, 55, 0.36);
+}
+
+.qms-app[data-theme="light"] .auth-modal {
+  background: linear-gradient(150deg, #FFFFFF, #F5EFFB);
+  border-color: #DCCFEB;
+  color: #29223A;
+  box-shadow: 0 24px 70px rgba(31, 41, 55, 0.2);
+}
+
+.qms-app[data-theme="light"] .auth-field {
+  color: #34445a;
+}
+
+.qms-app[data-theme="light"] .auth-field input,
+.qms-app[data-theme="light"] .auth-field select,
+.qms-app[data-theme="light"] .chemist-address {
+  background: #FFFFFF;
+  border-color: #DED3EC;
+  color: #29223A;
+}
+
+.qms-app[data-theme="light"] .chemist-toggle {
+  color: #55476C;
+  background: #F5F0FA;
+  border-color: #DED3EC;
+}
+
+.qms-app[data-theme="light"] .chemist-fields {
+  background: #FAF7FD;
+  border-color: #E5DDF0;
+}
+
+.qms-app[data-theme="light"] .chemist-fields-title {
+  color: #7652B5;
+}
+
+.qms-app[data-theme="light"] .auth-close {
+  color: #68449F;
+  background: #F1EAF9;
+  border-color: #DCCFEB;
+}
+
+.qms-app[data-theme="light"] .portal-choice {
+  color: #29223A;
+  background: #FFFFFF;
+  border-color: #DED3EC;
+}
+
+.qms-app[data-theme="light"] .portal-choice-copy small {
+  color: #6B617B;
+}
+
+.qms-app[data-theme="light"] .portal-choice:hover {
+  background: #F7F2FC;
+  border-color: #B9A2E3;
+}
+
+.qms-app[data-theme="light"] .password-toggle,
+.qms-app[data-theme="light"] .auth-back {
+  color: #7652B5;
+}
+
+@media (max-width: 480px) {
+  .portal-choice {
+    padding: 13px;
+    gap: 10px;
+  }
+  .portal-choice-copy small {
+    font-size: 11px;
+  }
+  .auth-modal {
+    padding: 27px 21px;
+  }
+  .auth-modal h2 {
+    font-size: 24px;
+  }
+}

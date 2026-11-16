@@ -118,6 +118,49 @@ def check_for_duplicates(state: ComplaintState) -> str:
     return None
 
 
+@router.get("/complaints")
+async def list_complaints():
+    """
+    Lists all complaints from the database ordered by most recent first.
+    """
+    db = SessionLocal()
+    try:
+        records = db.query(DBComplaint).order_by(DBComplaint.created_at.desc()).all()
+        return [
+            {
+                "id": c.id,
+                "product_name": c.product_name,
+                "batch_number": c.batch_number,
+                "manufacturer": c.manufacturer,
+                "strength": c.strength,
+                "dosage_form": c.dosage_form,
+                "linked_batch_id": c.linked_batch_id,
+                "description": c.description,
+                "location": c.location,
+                "customer_name": c.customer_name,
+                "customer_contact": c.customer_contact,
+                "complaint_category": c.complaint_category,
+                "originating_site_block": c.originating_site_block,
+                "impacted_non_product_material": c.impacted_non_product_material,
+                "severity": c.severity,
+                "priority": c.priority,
+                "summary": c.summary,
+                "recommended_action": c.recommended_action,
+                "risk_assessment": c.risk_assessment,
+                "status": c.status,
+                "source": c.source,
+                "manufacturing_date": c.manufacturing_date,
+                "expiry_date": c.expiry_date,
+                "affected_quantity": c.affected_quantity,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            }
+            for c in records
+        ]
+    finally:
+        db.close()
+
+
 @router.get("/history/{conversation_id}", response_model=ComplaintState)
 async def get_complaint_history(conversation_id: str):
     """
@@ -152,10 +195,20 @@ async def get_complaint_history(conversation_id: str):
         chat_history.sort(key=lambda x: x.timestamp)
 
         # 3. Rebuild the State
+        try:
+            resolved_status = ComplaintStatus(db_complaint.status) if db_complaint.status else ComplaintStatus.PENDING_TRIAGE
+        except ValueError:
+            resolved_status = ComplaintStatus.PENDING_TRIAGE
+
+        try:
+            resolved_source = ComplaintSource(db_complaint.source) if db_complaint.source else ComplaintSource.CHAT
+        except ValueError:
+            resolved_source = ComplaintSource.CHAT
+
         state = ComplaintState(
             conversation_id=db_complaint.id,
-            status=ComplaintStatus(db_complaint.status) if db_complaint.status else ComplaintStatus.PENDING_TRIAGE,
-            source=ComplaintSource(db_complaint.source) if db_complaint.source else ComplaintSource.CHAT,
+            status=resolved_status,
+            source=resolved_source,
             product_name=db_complaint.product_name,
             batch_number=db_complaint.batch_number,
             manufacturer=db_complaint.manufacturer,

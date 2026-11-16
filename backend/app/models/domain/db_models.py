@@ -15,6 +15,9 @@ class DBUser(Base):
     full_name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     mobile_number = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    state = Column(String, nullable=True)
+    pincode = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
     account_status = Column(String, default="Active") # Pending, Active, Suspended
     
@@ -35,6 +38,13 @@ class DBOrganization(Base):
     organization_type = Column(String, nullable=False)
     country = Column(String, default="India")
     cin = Column(String, nullable=True)
+    gst_number = Column(String, nullable=True)
+    official_email = Column(String, nullable=True)
+    company_mobile = Column(String, nullable=True)
+    registered_address = Column(Text, nullable=True)
+    state = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    postal_code = Column(String, nullable=True)
     status = Column(String, default="Pending") # Draft, Submitted, Active, Suspended
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -119,6 +129,8 @@ class DBChemistProfile(Base):
     pharmacy_name = Column(String, nullable=False)
     pharmacy_type = Column(String, nullable=True)
     drug_license_number = Column(String, nullable=True)
+    gst_number = Column(String, nullable=True)
+    pharmacy_address = Column(Text, nullable=True)
     
     city = Column(String, nullable=True)
     state = Column(String, nullable=True)

@@ -1,0 +1,459 @@
+html.qms-workspace-active,
+html.qms-workspace-active body,
+html.qms-workspace-active #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+html.qms-workspace-active body {
+  font-family: Inter, Arial, sans-serif;
+  background: var(--c-0d1726);
+  color: var(--c-f2f5fa);
+}
+
+.qms-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid var(--c-30415a);
+  border-radius: 8px;
+  background: var(--c-172438);
+  color: var(--c-f2f5fa);
+  font: 600 12px Inter, Arial, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.qms-theme-toggle:hover {
+  border-color: var(--c-7968b8);
+}
+
+.qms-layout {
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--c-0d1726);
+}
+
+.qms-sidebar {
+  width: 184px;
+  flex: 0 0 184px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 13px;
+  background: var(--c-111d2e);
+  border-right: 1px solid var(--c-2b3b52);
+}
+
+.qms-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 8px 28px;
+  border-bottom: 1px solid var(--c-2b3b52);
+}
+
+.qms-brand-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--c-fff);
+  font-size: 20px;
+  background: linear-gradient(145deg, var(--c-8876c8), var(--c-62558f));
+}
+
+.qms-brand strong {
+  display: block;
+  font-size: 17px;
+  letter-spacing: -0.3px;
+}
+
+.qms-brand small {
+  display: block;
+  margin-top: 4px;
+  color: var(--c-9eacc0);
+  font-size: 11px;
+}
+
+.qms-nav {
+  display: grid;
+  gap: 8px;
+  margin-top: 28px;
+}
+
+.qms-nav button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--c-b7c3d3);
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.qms-nav button.active {
+  color: var(--c-f5f2ff);
+  background: rgba(121, 104, 184, 0.2);
+  border-color: rgba(169, 154, 222, 0.28);
+}
+
+.qms-nav button:hover {
+  background: rgba(121, 104, 184, 0.12);
+  color: var(--c-fff);
+}
+
+.qms-sidebar-bottom {
+  margin-top: auto;
+  padding: 14px 10px 0;
+  border-top: 1px solid var(--c-2b3b52);
+  color: var(--c-9eacc0);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.qms-content {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.qms-topbar {
+  height: 58px;
+  flex: 0 0 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 30px;
+  background: var(--c-111d2e);
+  border-bottom: 1px solid var(--c-2b3b52);
+}
+
+.qms-topbar-label {
+  color: var(--c-aab7c9);
+  font-size: 13px;
+}
+
+.qms-profile {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--c-eef2f7);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.qms-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--c-34445f);
+  color: var(--c-e8e2ff);
+  border: 1px solid var(--c-7568a8);
+}
+
+.qms-page-heading {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 24px 13px;
+}
+
+.qms-page-heading h1 {
+  margin: 0 0 5px;
+  color: var(--c-f2f5fa);
+  font-size: 25px;
+  letter-spacing: -0.5px;
+}
+
+.qms-page-heading p {
+  margin: 0;
+  color: var(--c-9eacc0);
+  font-size: 13px;
+}
+
+.qms-page-tag {
+  padding: 8px 13px;
+  border: 1px solid var(--c-76643f);
+  border-radius: 8px;
+  color: var(--c-e9bd75);
+  background: var(--c-302b22);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.app-shell {
+  height: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  padding: 0 20px 18px;
+  gap: 14px;
+  overflow: hidden;
+}
+
+.chat-panel,
+.form-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--c-172438);
+  border: 1px solid var(--c-30415a);
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.chat-panel {
+  width: 300px;
+  flex: 0 0 300px;
+  min-height: 0;
+  height: 100%;
+  min-width: 0;
+}
+
+.chat-panel > div {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.chat-panel > div > div:nth-child(3) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-panel > div > div:nth-child(4) {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.chat-panel form {
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-panel textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.copilot-chat-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.copilot-upload-area {
+  flex: 0 0 auto;
+}
+
+.copilot-messages {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
+}
+
+.copilot-composer {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.copilot-composer textarea {
+  width: 100%;
+  max-width: 100%;
+  min-height: 48px;
+  max-height: 80px;
+  overflow: hidden !important;
+  scrollbar-width: none;
+}
+
+.copilot-composer textarea::-webkit-scrollbar {
+  display: none;
+}
+
+.copilot-composer button {
+  z-index: 2;
+}
+
+.form-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.back-button {
+  position: fixed;
+  left: 16px;
+  bottom: 14px;
+  z-index: 20;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.qms-layout[data-theme="dark"] .qms-brand-mark {
+  background: linear-gradient(145deg, #9272D5, #60439A);
+}
+
+.qms-layout[data-theme="dark"] .qms-nav button.active {
+  background: rgba(139, 104, 216, 0.2);
+  border-color: rgba(173, 145, 235, 0.35);
+}
+
+.qms-layout[data-theme="light"] .qms-brand-mark {
+  background: linear-gradient(145deg, #A58BD5, #7652B5);
+}
+
+.qms-layout[data-theme="light"] .qms-nav button.active {
+  background: #EEE7F8;
+  border-color: #D6C7EA;
+  color: #624394;
+}
+
+.qms-layout[data-theme="light"] .qms-page-tag {
+  color: #76521D;
+  background: #FFF7E8;
+  border-color: #E9D5AC;
+}
+
+.qms-layout[data-theme="light"] .qms-theme-toggle {
+  background: #F1EAF9;
+  border-color: #D8C9EA;
+  color: #65469A;
+}
+
+@media (max-width: 1100px) {
+  .qms-sidebar {
+    width: 168px;
+    flex-basis: 168px;
+  }
+  .chat-panel {
+    width: 280px;
+    flex-basis: 280px;
+  }
+  .app-shell {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
+@media (max-width: 800px) {
+  html.qms-workspace-active,
+  html.qms-workspace-active body,
+  html.qms-workspace-active #root {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+  .qms-layout {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .qms-sidebar {
+    width: 64px;
+    flex-basis: 64px;
+    min-height: 100vh;
+    padding: 16px 7px;
+  }
+  .qms-brand {
+    justify-content: center;
+    padding: 0 0 16px;
+  }
+  .qms-brand > div:last-child,
+  .qms-nav button span:last-child,
+  .qms-sidebar-bottom {
+    display: none;
+  }
+  .qms-nav button {
+    justify-content: center;
+    padding: 13px 5px;
+    font-size: 18px;
+  }
+  .qms-topbar {
+    padding: 0 14px;
+  }
+  .qms-page-heading {
+    padding: 15px 14px;
+  }
+  .app-shell {
+    height: auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: visible;
+    padding: 0 12px 14px;
+  }
+  .chat-panel {
+    width: 100%;
+    flex: 0 0 auto;
+    height: 440px;
+    min-height: 0;
+  }
+  .chat-panel > div {
+    min-height: 0;
+  }
+  .form-panel {
+    min-height: 650px;
+    height: auto;
+    overflow: visible;
+  }
+  .qms-content {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 480px) {
+  .qms-sidebar {
+    display: none;
+  }
+  .qms-page-heading h1 {
+    font-size: 20px;
+  }
+  .qms-topbar-label {
+    font-size: 11px;
+  }
+  .app-shell {
+    padding: 0 10px 14px;
+  }
+}

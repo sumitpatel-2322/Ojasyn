@@ -1,0 +1,713 @@
+from dataclasses import dataclass
+from typing import Dict, FrozenSet, List, Set, Tuple
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.domain.enums import RoleScope
+
+
+@dataclass(frozen=True)
+class RoleDefinition:
+    role_code: str
+    role_name: str
+    role_scope: RoleScope
+    allowed_assignment_scopes: FrozenSet[str]
+    is_quality_sensitive: bool = False
+    is_org_wide_by_default: bool = False
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class PermissionDefinition:
+    permission_code: str
+    resource: str
+    action: str
+    description: str = ""
+
+
+# Canonical 19 internal roles (Doc 2 §4.2) + 4 partner roles + CUSTOMER
+CANONICAL_ROLES: Tuple[RoleDefinition, ...] = (
+    RoleDefinition(
+        "PLATFORM_SUPER_ADMIN",
+        "Platform Super Administrator",
+        RoleScope.PLATFORM,
+        frozenset(),
+        description="Manage tenant onboarding verification and platform operations.",
+    ),
+    RoleDefinition(
+        "ORG_OWNER",
+        "Organization Owner",
+        RoleScope.ORGANIZATION,
+        frozenset({"ORGANIZATION"}),
+        is_org_wide_by_default=True,
+        description="Legal/admin ownership and top-level org administration.",
+    ),
+    RoleDefinition(
+        "ORG_ADMIN",
+        "Organization Administrator",
+        RoleScope.ORGANIZATION,
+        frozenset({"ORGANIZATION"}),
+        is_org_wide_by_default=True,
+        description="Manage organization details, sites, invitations, and memberships.",
+    ),
+    RoleDefinition(
+        "QMS_HEAD",
+        "QMS Head",
+        RoleScope.ORGANIZATION,
+        frozenset({"ORGANIZATION", "SITE"}),
+        is_quality_sensitive=True,
+        is_org_wide_by_default=True,
+        description="Oversee QMS processes, escalations, and quality approvals.",
+    ),
+    RoleDefinition(
+        "QA_HEAD",
+        "QA Head",
+        RoleScope.SITE,
+        frozenset({"ORGANIZATION", "SITE"}),
+        is_quality_sensitive=True,
+        is_org_wide_by_default=True,
+        description="Own complaint triage, investigations, CAPA oversight, and QA approvals.",
+    ),
+    RoleDefinition(
+        "BATCH_DISPOSITION_APPROVER",
+        "Batch Disposition Approver",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        is_quality_sensitive=True,
+        description="Authorized batch release/quarantine/rejection disposition.",
+    ),
+    RoleDefinition(
+        "QA_OFFICER",
+        "QA Officer",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        description="Review complaints, investigate, assess evidence, and prepare decisions.",
+    ),
+    RoleDefinition(
+        "QC_HEAD",
+        "QC Head",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        is_quality_sensitive=True,
+        description="Manage QC testing workflow, analysts, and lab record review.",
+    ),
+    RoleDefinition(
+        "QC_ANALYST",
+        "QC Analyst",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        is_quality_sensitive=True,
+        description="Record QC samples, methods, raw data, and test results.",
+    ),
+    RoleDefinition(
+        "PRODUCTION_HEAD",
+        "Production Head",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        description="Manage production resources, execution records, and supervisors.",
+    ),
+    RoleDefinition(
+        "PRODUCTION_SUPERVISOR",
+        "Production Supervisor",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        description="Assign stages and review execution completeness.",
+    ),
+    RoleDefinition(
+        "PRODUCTION_OPERATOR",
+        "Production Operator",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        description="Record actual execution steps, parameters, and materials.",
+    ),
+    RoleDefinition(
+        "WAREHOUSE_MANAGER",
+        "Warehouse Manager",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        description="Manage receipt, storage, quarantine, and material inventory.",
+    ),
+    RoleDefinition(
+        "DISPATCH_COORDINATOR",
+        "Dispatch Coordinator",
+        RoleScope.SITE,
+        frozenset({"SITE"}),
+        description="Record shipments, consignees, and dispatch batch movements.",
+    ),
+    RoleDefinition(
+        "DOCUMENT_CONTROLLER",
+        "Document Controller",
+        RoleScope.ORGANIZATION,
+        frozenset({"ORGANIZATION", "SITE"}),
+        description="Manage controlled documents, versions, and SOP revisions.",
+    ),
+    RoleDefinition(
+        "REGULATORY_AFFAIRS",
+        "Regulatory Affairs",
+        RoleScope.ORGANIZATION,
+        frozenset({"ORGANIZATION", "SITE"}),
+        description="Maintain regulatory product/licence metadata and submissions.",
+    ),
+    RoleDefinition(
+        "PHARMACOVIGILANCE_OFFICER",
+        "Pharmacovigilance Officer",
+        RoleScope.ORGANIZATION,
+        frozenset({"ORGANIZATION", "SITE"}),
+        description="Handle adverse-event intake and PV safety referrals.",
+    ),
+    RoleDefinition(
+        "CUSTOMER_SERVICE",
+        "Customer Service",
+        RoleScope.ORGANIZATION,
+        frozenset({"ORGANIZATION", "SITE"}),
+        description="Receive complaints and request missing reporter information.",
+    ),
+    RoleDefinition(
+        "AUDITOR_READ_ONLY",
+        "Read-Only Auditor",
+        RoleScope.ORGANIZATION,
+        frozenset({"ORGANIZATION", "SITE"}),
+        is_org_wide_by_default=True,
+        description="Time-bounded read access to authorized records and audit exports.",
+    ),
+    # External Partner & Customer Roles
+    RoleDefinition("PARTNER_ADMIN", "Partner Administrator", RoleScope.PARTNER, frozenset()),
+    RoleDefinition("PARTNER_CHEMIST", "Partner Chemist", RoleScope.PARTNER, frozenset()),
+    RoleDefinition("PARTNER_VIEWER", "Partner Viewer", RoleScope.PARTNER, frozenset()),
+    RoleDefinition("DISTRIBUTOR_USER", "Distributor User", RoleScope.PARTNER, frozenset()),
+    RoleDefinition("CUSTOMER", "Customer Reporter", RoleScope.PLATFORM, frozenset()),
+)
+
+ROLE_DEFINITIONS_BY_CODE: Dict[str, RoleDefinition] = {r.role_code: r for r in CANONICAL_ROLES}
+QUALITY_SENSITIVE_ROLES: FrozenSet[str] = frozenset(
+    r.role_code for r in CANONICAL_ROLES if r.is_quality_sensitive
+)
+ORG_WIDE_ROLES: FrozenSet[str] = frozenset(
+    r.role_code for r in CANONICAL_ROLES if r.is_org_wide_by_default
+)
+
+PERMISSIONS: Tuple[PermissionDefinition, ...] = (
+    PermissionDefinition("org.read", "org", "read"),
+    PermissionDefinition("org.manage", "org", "manage"),
+    PermissionDefinition("org.review", "org", "review"),
+    PermissionDefinition("site.read", "site", "read"),
+    PermissionDefinition("site.manage", "site", "manage"),
+    PermissionDefinition("site.review", "site", "review"),
+    PermissionDefinition("department.manage", "department", "manage"),
+    PermissionDefinition("membership.read", "membership", "read"),
+    PermissionDefinition("membership.invite", "membership", "invite"),
+    PermissionDefinition("membership.approve", "membership", "approve"),
+    PermissionDefinition("membership.revoke", "membership", "revoke"),
+    PermissionDefinition("role.assign", "role", "assign"),
+    PermissionDefinition("role.revoke", "role", "revoke"),
+    PermissionDefinition("people.qualification.manage", "people", "qualification_manage"),
+    PermissionDefinition("people.training.manage", "people", "training_manage"),
+    PermissionDefinition("partner.manage", "partner", "manage"),
+    PermissionDefinition("partner.read", "partner", "read"),
+    PermissionDefinition("master_data.read", "master_data", "read"),
+    PermissionDefinition("master_data.manage_global", "master_data", "manage_global"),
+    PermissionDefinition("master_data.manage_tenant", "master_data", "manage_tenant"),
+    PermissionDefinition("document.read", "document", "read"),
+    PermissionDefinition("document.upload", "document", "upload"),
+    PermissionDefinition("document.download", "document", "download"),
+    PermissionDefinition("sop.read", "sop", "read"),
+    PermissionDefinition("sop.manage", "sop", "manage"),
+    PermissionDefinition("sop.approve", "sop", "approve"),
+    PermissionDefinition("product.read", "product", "read"),
+    PermissionDefinition("product.manage", "product", "manage"),
+    PermissionDefinition("mbr.manage", "mbr", "manage"),
+    PermissionDefinition("batch.read", "batch", "read"),
+    PermissionDefinition("batch.create", "batch", "create"),
+    PermissionDefinition("batch.release", "batch", "release"),
+    PermissionDefinition("batch.genealogy.read", "batch", "genealogy_read"),
+    PermissionDefinition("execution.read", "execution", "read"),
+    PermissionDefinition("execution.record", "execution", "record"),
+    PermissionDefinition("material.manage", "material", "manage"),
+    PermissionDefinition("equipment.manage", "equipment", "manage"),
+    PermissionDefinition("calibration.record", "calibration", "record"),
+    PermissionDefinition("qc_def.manage", "qc_def", "manage"),
+    PermissionDefinition("qc_result.read", "qc_result", "read"),
+    PermissionDefinition("qc_result.record", "qc_result", "record"),
+    PermissionDefinition("qc_result.approve", "qc_result", "approve"),
+    PermissionDefinition("deviation.read", "deviation", "read"),
+    PermissionDefinition("deviation.create", "deviation", "create"),
+    PermissionDefinition("deviation.manage", "deviation", "manage"),
+    PermissionDefinition("oos.manage", "oos", "manage"),
+    PermissionDefinition("oos.approve", "oos", "approve"),
+    PermissionDefinition("shipment.read", "shipment", "read"),
+    PermissionDefinition("shipment.manage", "shipment", "manage"),
+    PermissionDefinition("shipment.receipt", "shipment", "receipt"),
+    PermissionDefinition("complaint.read", "complaint", "read"),
+    PermissionDefinition("complaint.create", "complaint", "create"),
+    PermissionDefinition("complaint.update", "complaint", "update"),
+    PermissionDefinition("complaint.triage", "complaint", "triage"),
+    PermissionDefinition("complaint.assign", "complaint", "assign"),
+    PermissionDefinition("complaint.communicate", "complaint", "communicate"),
+    PermissionDefinition("complaint.batch_resolve", "complaint", "batch_resolve"),
+    PermissionDefinition("complaint.close", "complaint", "close"),
+    PermissionDefinition("investigation.read", "investigation", "read"),
+    PermissionDefinition("investigation.open", "investigation", "open"),
+    PermissionDefinition("investigation.execute", "investigation", "execute"),
+    PermissionDefinition("investigation.review", "investigation", "review"),
+    PermissionDefinition("report.generate", "report", "generate"),
+    PermissionDefinition("report.download", "report", "download"),
+    PermissionDefinition("capa.read", "capa", "read"),
+    PermissionDefinition("capa.manage", "capa", "manage"),
+    PermissionDefinition("capa.close", "capa", "close"),
+    PermissionDefinition("change_control.manage", "change_control", "manage"),
+    PermissionDefinition("change_control.approve", "change_control", "approve"),
+    PermissionDefinition("qrm.manage", "qrm", "manage"),
+    PermissionDefinition("recall.initiate", "recall", "initiate"),
+    PermissionDefinition("recall.close", "recall", "close"),
+    PermissionDefinition("notification.read", "notification", "read"),
+    PermissionDefinition("notification.create", "notification", "create"),
+    PermissionDefinition("email_intake.triage", "email_intake", "triage"),
+    PermissionDefinition("email_intake.admin", "email_intake", "admin"),
+    PermissionDefinition("audit.read", "audit", "read"),
+    PermissionDefinition("audit.export", "audit", "export"),
+    PermissionDefinition("document.extract", "document", "extract"),
+    PermissionDefinition("email_intake.process", "email_intake", "process"),
+)
+
+PERMISSION_CODES: FrozenSet[str] = frozenset(p.permission_code for p in PERMISSIONS)
+
+# Background worker permissions: strictly excludes human quality approvals
+WORKER_PERMISSIONS: FrozenSet[str] = frozenset(
+    {
+        "complaint.triage",
+        "investigation.execute",
+        "notification.create",
+        "document.extract",
+        "email_intake.process",
+    }
+)
+
+ROLE_PERMISSION_MAP: Dict[str, Set[str]] = {
+    "PLATFORM_SUPER_ADMIN": {
+        "org.read",
+        "org.review",
+        "site.read",
+        "site.review",
+        "master_data.read",
+        "master_data.manage_global",
+        "complaint.read",
+        "complaint.triage",
+        "email_intake.triage",
+        "audit.read",
+    },
+    "ORG_OWNER": {
+        "org.read",
+        "org.manage",
+        "site.read",
+        "site.manage",
+        "department.manage",
+        "membership.read",
+        "membership.invite",
+        "membership.approve",
+        "membership.revoke",
+        "role.assign",
+        "role.revoke",
+        "partner.read",
+        "partner.manage",
+        "master_data.read",
+        "master_data.manage_tenant",
+        "email_intake.admin",
+        "notification.read",
+        "audit.read",
+    },
+    "ORG_ADMIN": {
+        "org.read",
+        "org.manage",
+        "site.read",
+        "site.manage",
+        "department.manage",
+        "membership.read",
+        "membership.invite",
+        "membership.approve",
+        "membership.revoke",
+        "role.assign",
+        "role.revoke",
+        "people.qualification.manage",
+        "people.training.manage",
+        "partner.read",
+        "partner.manage",
+        "master_data.read",
+        "master_data.manage_tenant",
+        "email_intake.admin",
+        "notification.read",
+        "audit.read",
+    },
+    "QMS_HEAD": {
+        "org.read",
+        "site.read",
+        "membership.read",
+        "membership.approve",
+        "role.assign",
+        "people.qualification.manage",
+        "people.training.manage",
+        "master_data.read",
+        "master_data.manage_tenant",
+        "document.read",
+        "document.download",
+        "sop.read",
+        "sop.approve",
+        "product.read",
+        "batch.read",
+        "batch.genealogy.read",
+        "execution.read",
+        "qc_result.read",
+        "deviation.read",
+        "deviation.manage",
+        "shipment.read",
+        "complaint.read",
+        "complaint.assign",
+        "complaint.triage",
+        "complaint.batch_resolve",
+        "complaint.close",
+        "investigation.read",
+        "investigation.open",
+        "investigation.execute",
+        "investigation.review",
+        "report.generate",
+        "report.download",
+        "capa.read",
+        "capa.manage",
+        "capa.close",
+        "change_control.manage",
+        "change_control.approve",
+        "qrm.manage",
+        "recall.initiate",
+        "recall.close",
+        "notification.read",
+        "audit.read",
+        "audit.export",
+    },
+    "QA_HEAD": {
+        "org.read",
+        "site.read",
+        "people.training.manage",
+        "master_data.read",
+        "document.read",
+        "document.download",
+        "sop.read",
+        "sop.approve",
+        "product.read",
+        "mbr.manage",
+        "batch.read",
+        "batch.genealogy.read",
+        "execution.read",
+        "qc_result.read",
+        "deviation.read",
+        "deviation.create",
+        "deviation.manage",
+        "oos.approve",
+        "shipment.read",
+        "complaint.read",
+        "complaint.create",
+        "complaint.update",
+        "complaint.triage",
+        "complaint.assign",
+        "complaint.communicate",
+        "complaint.batch_resolve",
+        "complaint.close",
+        "investigation.read",
+        "investigation.open",
+        "investigation.execute",
+        "investigation.review",
+        "report.generate",
+        "report.download",
+        "capa.read",
+        "capa.manage",
+        "capa.close",
+        "change_control.manage",
+        "change_control.approve",
+        "qrm.manage",
+        "recall.initiate",
+        "recall.close",
+        "email_intake.triage",
+        "notification.read",
+        "audit.read",
+        "audit.export",
+    },
+    "BATCH_DISPOSITION_APPROVER": {
+        "site.read",
+        "document.read",
+        "document.download",
+        "sop.read",
+        "product.read",
+        "batch.read",
+        "batch.release",
+        "batch.genealogy.read",
+        "execution.read",
+        "qc_result.read",
+        "deviation.read",
+        "notification.read",
+    },
+    "QA_OFFICER": {
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "document.upload",
+        "document.download",
+        "sop.read",
+        "product.read",
+        "batch.read",
+        "batch.genealogy.read",
+        "execution.read",
+        "qc_result.read",
+        "deviation.read",
+        "deviation.create",
+        "deviation.manage",
+        "shipment.read",
+        "complaint.read",
+        "complaint.create",
+        "complaint.update",
+        "complaint.triage",
+        "complaint.assign",
+        "complaint.communicate",
+        "complaint.batch_resolve",
+        "investigation.read",
+        "investigation.open",
+        "investigation.execute",
+        "report.generate",
+        "report.download",
+        "capa.read",
+        "capa.manage",
+        "email_intake.triage",
+        "notification.read",
+    },
+    "QC_HEAD": {
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "document.upload",
+        "document.download",
+        "sop.read",
+        "product.read",
+        "batch.read",
+        "equipment.manage",
+        "calibration.record",
+        "qc_def.manage",
+        "qc_result.read",
+        "qc_result.record",
+        "qc_result.approve",
+        "deviation.read",
+        "deviation.create",
+        "oos.manage",
+        "oos.approve",
+        "notification.read",
+    },
+    "QC_ANALYST": {
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "document.upload",
+        "sop.read",
+        "product.read",
+        "batch.read",
+        "qc_result.read",
+        "qc_result.record",
+        "deviation.read",
+        "deviation.create",
+        "oos.manage",
+        "notification.read",
+    },
+    "PRODUCTION_HEAD": {
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "document.upload",
+        "sop.read",
+        "product.read",
+        "product.manage",
+        "mbr.manage",
+        "batch.read",
+        "batch.create",
+        "execution.read",
+        "execution.record",
+        "material.manage",
+        "equipment.manage",
+        "deviation.read",
+        "deviation.create",
+        "notification.read",
+    },
+    "PRODUCTION_SUPERVISOR": {
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "document.upload",
+        "sop.read",
+        "product.read",
+        "batch.read",
+        "batch.create",
+        "execution.read",
+        "execution.record",
+        "equipment.manage",
+        "calibration.record",
+        "deviation.read",
+        "deviation.create",
+        "notification.read",
+    },
+    "PRODUCTION_OPERATOR": {
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "sop.read",
+        "batch.read",
+        "execution.read",
+        "execution.record",
+        "deviation.create",
+        "notification.read",
+    },
+    "WAREHOUSE_MANAGER": {
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "batch.read",
+        "material.manage",
+        "shipment.read",
+        "shipment.manage",
+        "shipment.receipt",
+        "notification.read",
+    },
+    "DISPATCH_COORDINATOR": {
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "batch.read",
+        "shipment.read",
+        "shipment.manage",
+        "notification.read",
+    },
+    "DOCUMENT_CONTROLLER": {
+        "org.read",
+        "site.read",
+        "master_data.read",
+        "document.read",
+        "document.upload",
+        "document.download",
+        "sop.read",
+        "sop.manage",
+        "mbr.manage",
+        "change_control.manage",
+        "notification.read",
+    },
+    "REGULATORY_AFFAIRS": {
+        "org.read",
+        "site.read",
+        "org.manage",
+        "document.read",
+        "document.upload",
+        "document.download",
+        "product.read",
+        "product.manage",
+        "notification.read",
+    },
+    "PHARMACOVIGILANCE_OFFICER": {
+        "org.read",
+        "complaint.read",
+        "complaint.create",
+        "complaint.communicate",
+        "investigation.read",
+        "notification.read",
+    },
+    "CUSTOMER_SERVICE": {
+        "org.read",
+        "complaint.read",
+        "complaint.create",
+        "complaint.update",
+        "complaint.communicate",
+        "email_intake.triage",
+        "notification.read",
+    },
+    "AUDITOR_READ_ONLY": {
+        "org.read",
+        "site.read",
+        "document.read",
+        "document.download",
+        "sop.read",
+        "product.read",
+        "batch.read",
+        "batch.genealogy.read",
+        "execution.read",
+        "qc_result.read",
+        "deviation.read",
+        "shipment.read",
+        "complaint.read",
+        "investigation.read",
+        "report.download",
+        "capa.read",
+        "audit.read",
+        "audit.export",
+    },
+    "PARTNER_ADMIN": {"partner.read", "shipment.read", "shipment.receipt", "complaint.read", "complaint.create"},
+    "PARTNER_CHEMIST": {"partner.read", "shipment.read", "complaint.read", "complaint.create"},
+    "PARTNER_VIEWER": {"partner.read", "shipment.read", "complaint.read"},
+    "DISTRIBUTOR_USER": {"partner.read", "shipment.read", "shipment.receipt", "complaint.read", "complaint.create"},
+    "CUSTOMER": {"complaint.create", "complaint.read"},
+}
+
+
+def seed_rbac_catalog(db: Session) -> Dict[str, int]:
+    """
+    Idempotently seeds canonical Role, Permission, and RolePermission records.
+    Does not call db.commit(); participates in the caller's UnitOfWork.
+    """
+    from app.models.domain.identity import Permission, Role, RolePermission
+
+    existing_roles = {r.role_code: r for r in db.scalars(select(Role)).all()}
+    existing_perms = {p.permission_code: p for p in db.scalars(select(Permission)).all()}
+
+    roles_created = 0
+    perms_created = 0
+    links_created = 0
+
+    for role_def in CANONICAL_ROLES:
+        if role_def.role_code not in existing_roles:
+            role_obj = Role(
+                role_code=role_def.role_code,
+                role_name=role_def.role_name,
+                role_scope=role_def.role_scope.value,
+                is_system_role=True,
+                description=role_def.description,
+                status="ACTIVE",
+            )
+            db.add(role_obj)
+            existing_roles[role_def.role_code] = role_obj
+            roles_created += 1
+
+    for perm_def in PERMISSIONS:
+        if perm_def.permission_code not in existing_perms:
+            perm_obj = Permission(
+                permission_code=perm_def.permission_code,
+                resource=perm_def.resource,
+                action=perm_def.action,
+                description=perm_def.description,
+            )
+            db.add(perm_obj)
+            existing_perms[perm_def.permission_code] = perm_obj
+            perms_created += 1
+
+    db.flush()
+
+    existing_links: Set[Tuple] = {
+        (rp.role_id, rp.permission_id) for rp in db.scalars(select(RolePermission)).all()
+    }
+
+    for role_code, perm_codes in ROLE_PERMISSION_MAP.items():
+        role_obj = existing_roles[role_code]
+        for perm_code in perm_codes:
+            perm_obj = existing_perms[perm_code]
+            pair = (role_obj.id, perm_obj.id)
+            if pair not in existing_links:
+                db.add(RolePermission(role_id=role_obj.id, permission_id=perm_obj.id))
+                existing_links.add(pair)
+                links_created += 1
+
+    db.flush()
+    return {
+        "roles_created": roles_created,
+        "permissions_created": perms_created,
+        "role_permissions_created": links_created,
+    }

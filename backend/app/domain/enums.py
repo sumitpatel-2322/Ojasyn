@@ -1,0 +1,302 @@
+from enum import Enum
+
+
+class OrganizationStatus(str, Enum):
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    ACTIVE = "ACTIVE"
+    NEEDS_INFORMATION = "NEEDS_INFORMATION"
+    SUSPENDED = "SUSPENDED"
+    REJECTED = "REJECTED"
+    CLOSED = "CLOSED"
+
+
+class OrganizationType(str, Enum):
+    MANUFACTURER = "MANUFACTURER"
+    API_MANUFACTURER = "API_MANUFACTURER"
+    FDF_MANUFACTURER = "FDF_MANUFACTURER"
+    CONTRACT_MANUFACTURER = "CONTRACT_MANUFACTURER"
+    IMPORTER = "IMPORTER"
+    MARKETER = "MARKETER"
+
+
+class AddressType(str, Enum):
+    REGISTERED = "REGISTERED"
+    BILLING = "BILLING"
+    CORRESPONDENCE = "CORRESPONDENCE"
+    OTHER = "OTHER"
+
+
+class SiteType(str, Enum):
+    MANUFACTURING = "MANUFACTURING"
+    API = "API"
+    FDF = "FDF"
+    QC_LAB = "QC_LAB"
+    WAREHOUSE = "WAREHOUSE"
+    PACKAGING = "PACKAGING"
+    R_AND_D = "R_AND_D"
+    DISTRIBUTION = "DISTRIBUTION"
+    COMBINED = "COMBINED"
+
+
+class SiteStatus(str, Enum):
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    ACTIVE = "ACTIVE"
+    NEEDS_INFORMATION = "NEEDS_INFORMATION"
+    INACTIVE = "INACTIVE"
+    SUSPENDED = "SUSPENDED"
+
+
+class UserAccountStatus(str, Enum):
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    ACTIVE = "ACTIVE"
+    LOCKED = "LOCKED"
+    SUSPENDED = "SUSPENDED"
+    DEACTIVATED = "DEACTIVATED"
+
+
+class MFAState(str, Enum):
+    DISABLED = "DISABLED"
+    ENROLLED = "ENROLLED"
+    REQUIRED = "REQUIRED"
+
+
+class CredentialType(str, Enum):
+    PASSWORD = "PASSWORD"
+    REFRESH_TOKEN = "REFRESH_TOKEN"
+    SSO = "SSO"
+    MFA = "MFA"
+    API_KEY = "API_KEY"
+
+
+class MemberType(str, Enum):
+    EMPLOYEE = "EMPLOYEE"
+    CONTRACTOR = "CONTRACTOR"
+    SERVICE_PROVIDER = "SERVICE_PROVIDER"
+    PARTNER_USER = "PARTNER_USER"
+
+
+class MembershipStatus(str, Enum):
+    INVITED = "INVITED"
+    PENDING_ACCEPTANCE = "PENDING_ACCEPTANCE"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+    ACTIVE = "ACTIVE"
+    EXPIRED = "EXPIRED"
+    REJECTED = "REJECTED"
+    SUSPENDED = "SUSPENDED"
+    REVOKED = "REVOKED"
+
+
+class AssignmentType(str, Enum):
+    PRIMARY = "PRIMARY"
+    SECONDARY = "SECONDARY"
+    TEMPORARY = "TEMPORARY"
+
+
+class AssignmentStatus(str, Enum):
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    REVOKED = "REVOKED"
+
+
+class RoleScope(str, Enum):
+    PLATFORM = "PLATFORM"
+    ORGANIZATION = "ORGANIZATION"
+    SITE = "SITE"
+    PARTNER = "PARTNER"
+
+
+class RoleAssignmentScopeType(str, Enum):
+    ORGANIZATION = "ORGANIZATION"
+    SITE = "SITE"
+
+
+class RoleAssignmentStatus(str, Enum):
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    REVOKED = "REVOKED"
+    EXPIRED = "EXPIRED"
+
+
+class InvitationStatus(str, Enum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    EXPIRED = "EXPIRED"
+    REVOKED = "REVOKED"
+
+
+class EmploymentStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    ON_LEAVE = "ON_LEAVE"
+    TERMINATED = "TERMINATED"
+    CONTRACT_ENDED = "CONTRACT_ENDED"
+
+
+class OutboxStatus(str, Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    PUBLISHED = "PUBLISHED"
+    FAILED = "FAILED"
+    DEAD_LETTER = "DEAD_LETTER"
+
+
+class NotificationDeliveryStatus(str, Enum):
+    PENDING = "PENDING"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
+
+
+class SecurityEventOutcome(str, Enum):
+    SUCCESS = "SUCCESS"
+    DENIED = "DENIED"
+    FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
+
+
+class SecurityEventSeverity(str, Enum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class ApprovalDecision(str, Enum):
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    REQUEST_MORE_WORK = "REQUEST_MORE_WORK"
+
+
+class ActorType(str, Enum):
+    USER = "USER"
+    SYSTEM_WORKER = "SYSTEM_WORKER"
+    WEBHOOK = "WEBHOOK"
+    ANONYMOUS = "ANONYMOUS"
+
+
+# Forward-locked domain lifecycle enums (Phases 1-7)
+class ComplaintStatus(str, Enum):
+    UNROUTED_TRIAGE = "UNROUTED_TRIAGE"
+    RECEIVED = "RECEIVED"
+    TRIAGED = "TRIAGED"
+    WAITING_INFO = "WAITING_INFO"
+    INVESTIGATION_OPEN = "INVESTIGATION_OPEN"
+    UNDER_QA_REVIEW = "UNDER_QA_REVIEW"
+    ACTION_PENDING = "ACTION_PENDING"
+    CLOSED = "CLOSED"
+    REJECTED = "REJECTED"
+
+
+class ComplaintSource(str, Enum):
+    WEBSITE = "WEBSITE"
+    EMAIL = "EMAIL"
+    STAFF = "STAFF"
+    CHEMIST = "CHEMIST"
+    PARTNER = "PARTNER"
+    API = "API"
+    PHONE_ENTRY = "PHONE_ENTRY"
+
+
+class Severity(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class Priority(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    URGENT = "URGENT"
+
+
+class BatchStatus(str, Enum):
+    PLANNED = "PLANNED"
+    IN_PROCESS = "IN_PROCESS"
+    QUARANTINED = "QUARANTINED"
+    RELEASED = "RELEASED"
+    REJECTED = "REJECTED"
+    RECALLED = "RECALLED"
+    EXPIRED = "EXPIRED"
+
+
+class SOPRevisionStatus(str, Enum):
+    DRAFT = "DRAFT"
+    REVIEW = "REVIEW"
+    APPROVED = "APPROVED"
+    EFFECTIVE = "EFFECTIVE"
+    SUPERSEDED = "SUPERSEDED"
+    OBSOLETE = "OBSOLETE"
+
+
+class SOPComplianceResultStatus(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    MISSING = "MISSING"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    UNVERIFIED = "UNVERIFIED"
+
+
+class InvestigationStatus(str, Enum):
+    QUEUED = "QUEUED"
+    PROCESSING = "PROCESSING"
+    WAITING_FOR_INFORMATION = "WAITING_FOR_INFORMATION"
+    FAILED = "FAILED"
+    COMPLETED = "COMPLETED"
+    UNDER_QA_REVIEW = "UNDER_QA_REVIEW"
+    APPROVED = "APPROVED"
+    CLOSED = "CLOSED"
+
+
+class InvestigationRunStatus(str, Enum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    WAITING_FOR_HUMAN = "WAITING_FOR_HUMAN"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    RETRYABLE = "RETRYABLE"
+    DEAD_LETTER = "DEAD_LETTER"
+
+
+class InvestigationStepStatus(str, Enum):
+    STARTED = "STARTED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    WAITING = "WAITING"
+
+
+class HypothesisStatus(str, Enum):
+    PROPOSED = "PROPOSED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    NEEDS_MORE_EVIDENCE = "NEEDS_MORE_EVIDENCE"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    INCONCLUSIVE = "INCONCLUSIVE"
+
+
+class ReportStatus(str, Enum):
+    DRAFT = "DRAFT"
+    GENERATED = "GENERATED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    APPROVED = "APPROVED"
+    SUPERSEDED = "SUPERSEDED"
+
+
+class DeviationStatus(str, Enum):
+    OPEN = "OPEN"
+    UNDER_INVESTIGATION = "UNDER_INVESTIGATION"
+    CAPA_PENDING = "CAPA_PENDING"
+    QA_REVIEW = "QA_REVIEW"
+    CLOSED = "CLOSED"
+
+
+class CAPAStatus(str, Enum):
+    DRAFT = "DRAFT"
+    OPEN = "OPEN"
+    ACTIONS_IN_PROGRESS = "ACTIONS_IN_PROGRESS"
+    EFFECTIVENESS_REVIEW = "EFFECTIVENESS_REVIEW"
+    CLOSED = "CLOSED"

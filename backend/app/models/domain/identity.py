@@ -33,7 +33,7 @@ from app.domain.enums import (
     RoleAssignmentStatus,
     UserAccountStatus,
 )
-from app.models.domain.base import Base, UUIDPKMixin, utcnow
+from app.models.domain.base import Base, TenantScopedMixin, TimestampVersionMixin, UUIDPKMixin, utcnow
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 
@@ -56,6 +56,7 @@ class User(UUIDPKMixin, Base):
     account_status: Mapped[str] = mapped_column(
         String(30), nullable=False, default=UserAccountStatus.PENDING_VERIFICATION.value
     )
+    platform_role: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     mobile_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     mfa_state: Mapped[str] = mapped_column(String(30), nullable=False, default=MFAState.DISABLED.value)
@@ -478,3 +479,112 @@ class Invitation(UUIDPKMixin, Base):
         String(25), nullable=False, default=InvitationStatus.PENDING.value, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class EmployeeQualification(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base):
+    """Formal GMP/QMS qualifications, certifications, and analyst credentials for an employee."""
+
+    __tablename__ = "employee_qualifications"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "membership_id"],
+            ["organization_memberships.organization_id", "organization_memberships.id"],
+            ondelete="RESTRICT",
+            name="fk_emp_qual_org_membership",
+        ),
+        CheckConstraint(
+            "expires_on IS NULL OR issued_on IS NULL OR expires_on >= issued_on",
+            name="ck_emp_qual_valid_dates",
+        ),
+    )
+
+    membership_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organization_memberships.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    employee_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("employee_profiles.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    qualification_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    qualification_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    issuing_body: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    certificate_number: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    issued_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    expires_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # Nullable UUID without DB FK until Phase 2 migration creates documents table
+    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING", index=True)
+    verified_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TrainingRecord(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base):
+    """SOP/GXP training completion and competency assessment records."""
+
+    __tablename__ = "training_records"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "membership_id"],
+            ["organization_memberships.organization_id", "organization_memberships.id"],
+            ondelete="RESTRICT",
+            name="fk_training_org_membership",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "site_id"],
+            ["sites.organization_id", "sites.id"],
+            ondelete="RESTRICT",
+            name="fk_training_org_site",
+        ),
+        CheckConstraint(
+            "assessment_score IS NULL OR (assessment_score >= 0 AND assessment_score <= 100)",
+            name="ck_training_score_range",
+        ),
+        CheckConstraint(
+            "valid_until IS NULL OR valid_until >= completed_on",
+            name="ck_training_valid_until",
+        ),
+    )
+
+    membership_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organization_memberships.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    employee_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("employee_profiles.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    site_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("sites.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    training_topic: Mapped[str] = mapped_column(String(200), nullable=False)
+    training_method: Mapped[str] = mapped_column(String(40), nullable=False, default="CLASSROOM")
+    # Nullable UUIDs without DB FK until Phases 2/4 create documents and sop_revisions
+    sop_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    trainer_membership_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organization_memberships.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    completed_on: Mapped[date] = mapped_column(Date, nullable=False)
+    due_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    valid_until: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    assessment_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_status: Mapped[str] = mapped_column(String(30), nullable=False, default="COMPLETED", index=True)
+    evidence_document_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

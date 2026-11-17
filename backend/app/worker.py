@@ -18,6 +18,7 @@ from app.services.notification_service import NotificationService
 logger = logging.getLogger(__name__)
 
 OutboxHandler = Callable[[Session, OutboxEvent, Optional[TenantContext]], None]
+ExternalOutboxHandler = Callable[[sessionmaker[Session], OutboxEvent, Optional[TenantContext]], None]
 
 
 def build_worker_tenant_context(event: OutboxEvent) -> Optional[TenantContext]:
@@ -60,6 +61,67 @@ def _handle_notification_requested(
     )
 
 
+def _handle_complaint_async_triage(
+    session_factory: sessionmaker[Session],
+    event: OutboxEvent,
+    tenant_ctx: Optional[TenantContext],
+) -> None:
+    from app.services.complaint_service import ComplaintService
+
+    ComplaintService().handle_outbox_async_triage(session_factory, event, tenant_ctx)
+
+
+def _handle_document_extraction(
+    session_factory: sessionmaker[Session],
+    event: OutboxEvent,
+    tenant_ctx: Optional[TenantContext],
+) -> None:
+    from app.services.document_control_service import DocumentControlService
+
+    DocumentControlService().run_extraction_job(session_factory, event, tenant_ctx)
+
+
+def _handle_domain_event_relay(
+    db: Session,
+    event: OutboxEvent,
+    tenant_ctx: Optional[TenantContext],
+) -> None:
+    payload = event.payload_json or {}
+    recipient_raw = payload.get("recipient_membership_id")
+    if recipient_raw and tenant_ctx is not None:
+        NotificationService().create_in_tx(
+            db,
+            organization_id=tenant_ctx.organization_id,
+            recipient_membership_id=uuid.UUID(str(recipient_raw)),
+            event_type=event.event_type,
+            aggregate_type=event.aggregate_type,
+            aggregate_id=event.aggregate_id,
+            title=str(payload.get("title", event.event_type)),
+            body=str(payload.get("body", "")),
+        )
+        return
+    logger.info(
+        "Relayed domain outbox event %s for %s:%s",
+        event.event_type,
+        event.aggregate_type,
+        event.aggregate_id,
+    )
+
+
+_DEFAULT_DOMAIN_RELAY_EVENTS = (
+    "ComplaintAssigned",
+    "ComplaintTriaged",
+    "ComplaintRouted",
+    "EmailVerificationRequested",
+    "OrganizationDraftCreated",
+    "OrganizationSubmittedForReview",
+    "OrganizationReviewed",
+    "SiteReviewed",
+    "PartnerUserInvited",
+    "InvitationCreated",
+)
+
+
 class OutboxWorker:
     """
     Durable outbox relay and background job processor.
@@ -73,6 +135,7 @@ class OutboxWorker:
         worker_id: Optional[str] = None,
         session_factory: Optional[sessionmaker[Session]] = None,
         handlers: Optional[Dict[str, OutboxHandler]] = None,
+        external_handlers: Optional[Dict[str, ExternalOutboxHandler]] = None,
         lease_seconds: int = 60,
         base_backoff_seconds: int = 5,
     ) -> None:
@@ -81,12 +144,32 @@ class OutboxWorker:
         self._outbox_repo = OutboxRepository()
         self._lease_seconds = lease_seconds
         self._base_backoff_seconds = base_backoff_seconds
-        self._handlers: Dict[str, OutboxHandler] = handlers or {
-            "NotificationRequested": _handle_notification_requested,
-        }
+        if handlers is not None:
+            self._handlers: Dict[str, OutboxHandler] = dict(handlers)
+        else:
+            self._handlers = {"NotificationRequested": _handle_notification_requested}
+            for event_name in _DEFAULT_DOMAIN_RELAY_EVENTS:
+                self._handlers[event_name] = _handle_domain_event_relay
+
+        self._external_handlers: Dict[str, ExternalOutboxHandler] = (
+            dict(external_handlers)
+            if external_handlers is not None
+            else {
+                "ComplaintRegistered": _handle_complaint_async_triage,
+                "ComplaintTriageRequested": _handle_complaint_async_triage,
+                "DocumentExtractionRequested": _handle_document_extraction,
+            }
+        )
 
     def register_handler(self, event_type: str, handler: OutboxHandler) -> None:
         self._handlers[event_type] = handler
+
+    def register_external_handler(self, event_type: str, handler: ExternalOutboxHandler) -> None:
+        """
+        Registers a handler that performs external network/LLM/OCR I/O strictly outside
+        any open DB transaction (receiving `session_factory` instead of an open `Session`).
+        """
+        self._external_handlers[event_type] = handler
 
     def run_once(self, *, batch_size: int = 20) -> int:
         # 1. Reclaim any expired worker leases from crashed runs
@@ -116,17 +199,34 @@ class OutboxWorker:
 
     def _process_single_event(self, event_id: uuid.UUID) -> None:
         try:
+            ext_handler: Optional[ExternalOutboxHandler] = None
+            snapshot_event: Optional[OutboxEvent] = None
+            snapshot_ctx: Optional[TenantContext] = None
+
             with UnitOfWork(self._session_factory) as uow:
                 assert uow.session is not None
                 event = uow.session.get(OutboxEvent, event_id)
                 if event is None:
                     return
-                handler = self._handlers.get(event.event_type)
-                if handler is None:
-                    raise ValueError(f"No outbox handler registered for event_type={event.event_type}")
-                tenant_ctx = build_worker_tenant_context(event)
-                handler(uow.session, event, tenant_ctx)
-                self._outbox_repo.mark_published(uow.session, event.id)
+                ext_handler = self._external_handlers.get(event.event_type)
+                if ext_handler is not None:
+                    snapshot_ctx = build_worker_tenant_context(event)
+                    uow.session.expunge(event)
+                    snapshot_event = event
+                else:
+                    handler = self._handlers.get(event.event_type)
+                    if handler is None:
+                        raise ValueError(f"No outbox handler registered for event_type={event.event_type}")
+                    tenant_ctx = build_worker_tenant_context(event)
+                    handler(uow.session, event, tenant_ctx)
+                    self._outbox_repo.mark_published(uow.session, event.id)
+
+            if ext_handler is not None and snapshot_event is not None:
+                # External network / LLM / OCR I/O executes strictly outside any open DB transaction.
+                ext_handler(self._session_factory, snapshot_event, snapshot_ctx)
+                with UnitOfWork(self._session_factory) as uow:
+                    assert uow.session is not None
+                    self._outbox_repo.mark_published(uow.session, event_id)
         except Exception as exc:
             logger.exception("Outbox event %s failed: %s", event_id, exc)
             with UnitOfWork(self._session_factory) as uow:

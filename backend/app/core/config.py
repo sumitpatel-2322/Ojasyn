@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     LLM_MODEL_NAME: str = "llama-3.3-70b-versatile"
     LLM_TIMEOUT_SECONDS: float = Field(default=30.0, gt=0.0)
 
+    STORAGE_BACKEND: Literal["local", "s3"] = "local"
+    LOCAL_STORAGE_ROOT: str = str(_BACKEND_DIR / "vault_storage")
+
     REDIS_URL: Optional[str] = None
 
     @field_validator("DATABASE_URL")

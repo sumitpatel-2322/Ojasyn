@@ -213,6 +213,109 @@ class Priority(str, Enum):
     URGENT = "URGENT"
 
 
+class ClassificationSource(str, Enum):
+    AI_SUGGESTION = "AI_SUGGESTION"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+
+
+class BatchResolutionOutcome(str, Enum):
+    MATCHED = "MATCHED"
+    MANUAL_LINKED = "MANUAL_LINKED"
+    NOT_FOUND = "NOT_FOUND"
+    INSUFFICIENT_INFO = "INSUFFICIENT_INFO"
+
+
+class BatchMatchStatus(str, Enum):
+    PROPOSED = "PROPOSED"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+    MANUAL_LINK = "MANUAL_LINK"
+
+
+class CommunicationChannel(str, Enum):
+    EMAIL = "EMAIL"
+    PORTAL = "PORTAL"
+    PHONE = "PHONE"
+    LETTER = "LETTER"
+    INTERNAL_NOTE = "INTERNAL_NOTE"
+
+
+class CommunicationDirection(str, Enum):
+    INBOUND = "INBOUND"
+    OUTBOUND = "OUTBOUND"
+    INTERNAL = "INTERNAL"
+
+
+class CopilotSessionStatus(str, Enum):
+    ACTIVE_DRAFT = "ACTIVE_DRAFT"
+    SUBMITTED = "SUBMITTED"
+    ABANDONED = "ABANDONED"
+
+
+class CopilotIntentType(str, Enum):
+    CREATE = "CREATE"
+    EDIT = "EDIT"
+    QUERY = "QUERY"
+
+
+class SLAStatus(str, Enum):
+    ON_TRACK = "ON_TRACK"
+    AT_RISK = "AT_RISK"
+    BREACHED = "BREACHED"
+    PAUSED = "PAUSED"
+    MET = "MET"
+
+
+class DocumentType(str, Enum):
+    SOP = "SOP"
+    BMR = "BMR"
+    BPR = "BPR"
+    QC_RAW_DATA = "QC_RAW_DATA"
+    COA = "COA"
+    LICENCE = "LICENCE"
+    COMPLAINT_ATTACHMENT = "COMPLAINT_ATTACHMENT"
+    COMPLAINT_EVIDENCE = "COMPLAINT_EVIDENCE"
+    INVESTIGATION_REPORT = "INVESTIGATION_REPORT"
+    SHIPMENT_DOC = "SHIPMENT_DOC"
+    OTHER = "OTHER"
+
+
+class ConfidentialityLevel(str, Enum):
+    INTERNAL = "INTERNAL"
+    CONFIDENTIAL = "CONFIDENTIAL"
+    RESTRICTED = "RESTRICTED"
+    PUBLIC_INTAKE = "PUBLIC_INTAKE"
+
+
+class DocumentStatus(str, Enum):
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    SUPERSEDED = "SUPERSEDED"
+    ARCHIVED = "ARCHIVED"
+
+
+class ScanStatus(str, Enum):
+    PENDING_SCAN = "PENDING_SCAN"
+    CLEAN = "CLEAN"
+    QUARANTINED = "QUARANTINED"
+
+
+class DocumentApprovalStatus(str, Enum):
+    DRAFT = "DRAFT"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    APPROVED = "APPROVED"
+    EFFECTIVE = "EFFECTIVE"
+    SUPERSEDED = "SUPERSEDED"
+    REJECTED = "REJECTED"
+
+
+class ExtractionJobStatus(str, Enum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
 class BatchStatus(str, Enum):
     PLANNED = "PLANNED"
     IN_PROCESS = "IN_PROCESS"

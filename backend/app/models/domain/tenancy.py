@@ -20,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from app.domain.enums import AddressType, OrganizationStatus, SiteStatus
-from app.models.domain.base import Base, UUIDPKMixin, utcnow
+from app.models.domain.base import Base, TenantScopedMixin, TimestampVersionMixin, UUIDPKMixin, utcnow
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 
@@ -80,6 +80,11 @@ class Organization(UUIDPKMixin, Base):
         foreign_keys="OrganizationAddress.organization_id",
     )
     sites: Mapped[List["Site"]] = relationship("Site", back_populates="organization")
+    licenses: Mapped[List["OrganizationLicense"]] = relationship(
+        "OrganizationLicense",
+        back_populates="organization",
+        foreign_keys="OrganizationLicense.organization_id",
+    )
 
 
 class OrganizationAddress(UUIDPKMixin, Base):
@@ -168,6 +173,11 @@ class Site(UUIDPKMixin, Base):
     row_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="sites")
+    licenses: Mapped[List["SiteLicense"]] = relationship(
+        "SiteLicense",
+        back_populates="site",
+        foreign_keys="SiteLicense.site_id",
+    )
 
 
 class Department(UUIDPKMixin, Base):
@@ -242,3 +252,81 @@ class OrganizationSequence(UUIDPKMixin, Base):
     entity_type: Mapped[str] = mapped_column(String(40), nullable=False)
     period_year: Mapped[int] = mapped_column(Integer, nullable=False)
     last_value: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+
+
+class OrganizationLicense(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base):
+    """Regulatory and statutory licenses held at the organization legal-entity level."""
+
+    __tablename__ = "organization_licenses"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "license_type", "license_number", name="uq_org_licenses_type_num"),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from",
+            name="ck_org_licenses_valid_dates",
+        ),
+    )
+
+    license_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    license_number: Mapped[str] = mapped_column(String(120), nullable=False)
+    issuing_authority: Mapped[str] = mapped_column(String(150), nullable=False)
+    valid_from: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="ACTIVE", index=True)
+    # Nullable UUID column without DB FK until Phase 2 migration creates documents table
+    licence_document_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    metadata_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONType, nullable=True)
+
+    organization: Mapped["Organization"] = relationship(
+        "Organization",
+        back_populates="licenses",
+        foreign_keys="OrganizationLicense.organization_id",
+    )
+
+
+class SiteLicense(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base):
+    """Manufacturing/QC/warehouse site-specific regulatory licenses."""
+
+    __tablename__ = "site_licenses"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "site_id",
+            "license_type",
+            "license_number",
+            name="uq_site_licenses_site_type_num",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "site_id"],
+            ["sites.organization_id", "sites.id"],
+            ondelete="RESTRICT",
+            name="fk_site_licenses_org_site",
+        ),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from",
+            name="ck_site_licenses_valid_dates",
+        ),
+    )
+
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("sites.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    license_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    license_number: Mapped[str] = mapped_column(String(120), nullable=False)
+    issuing_authority: Mapped[str] = mapped_column(String(150), nullable=False)
+    scope_description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    valid_from: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="ACTIVE", index=True)
+    # Nullable UUID column without DB FK until Phase 2 migration creates documents table
+    licence_document_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    metadata_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONType, nullable=True)
+
+    site: Mapped["Site"] = relationship(
+        "Site",
+        back_populates="licenses",
+        foreign_keys=[site_id],
+    )
+

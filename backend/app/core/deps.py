@@ -1,7 +1,10 @@
+import threading
+import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, FrozenSet, Generator, Optional, Set
+from typing import Callable, Deque, Dict, FrozenSet, Generator, Iterable, Optional, Set, Tuple
 
 from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -9,7 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import UnitOfWork, get_session_factory
-from app.core.exceptions import AuthenticationError, PermissionDeniedError, ValidationError
+from app.core.exceptions import (
+    AuthenticationError,
+    PermissionDeniedError,
+    RateLimitError,
+    ValidationError,
+)
 from app.core.security import decode_access_token
 from app.domain.enums import (
     ActorType,
@@ -49,6 +57,7 @@ class Principal:
     token_iat: Optional[datetime] = None
     amr: tuple[str, ...] = ("pwd",)
     actor_type: str = ActorType.USER.value
+    platform_role: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -155,23 +164,41 @@ def get_current_principal(
         token_iat=token_iat,
         amr=tuple(payload.get("amr") or ("pwd",)),
         actor_type=ActorType.USER.value,
+        platform_role=getattr(user, "platform_role", None),
     )
 
 
-def get_tenant_context(
+_ONBOARDING_ORG_STATUSES: Tuple[str, ...] = (
+    OrganizationStatus.DRAFT.value,
+    OrganizationStatus.SUBMITTED.value,
+    OrganizationStatus.UNDER_REVIEW.value,
+    OrganizationStatus.NEEDS_INFORMATION.value,
+    OrganizationStatus.ACTIVE.value,
+)
+_ONBOARDING_ORG_WIDE_ROLES: FrozenSet[str] = ORG_WIDE_ROLES | frozenset({"REGULATORY_AFFAIRS"})
+
+
+def _parse_org_uuid(raw_value: Optional[str], field_name: str) -> Optional[uuid.UUID]:
+    if not raw_value:
+        return None
+    try:
+        return uuid.UUID(str(raw_value).strip())
+    except ValueError as exc:
+        raise ValidationError(f"Invalid {field_name}; expected UUID.") from exc
+
+
+def _resolve_tenant_context(
     request: Request,
-    principal: Principal = Depends(get_current_principal),
-    x_organization_id: Optional[str] = Header(default=None, alias="X-Organization-Id"),
-    db: Session = Depends(get_db),
+    principal: Principal,
+    requested_org_id: Optional[uuid.UUID],
+    db: Session,
+    *,
+    allowed_org_statuses: Iterable[str],
+    include_non_suspended_sites: bool = False,
+    org_wide_roles: FrozenSet[str] = ORG_WIDE_ROLES,
 ) -> TenantContext:
     now = datetime.now(timezone.utc)
-
-    requested_org_id: Optional[uuid.UUID] = None
-    if x_organization_id:
-        try:
-            requested_org_id = uuid.UUID(x_organization_id.strip())
-        except ValueError as exc:
-            raise ValidationError("Invalid X-Organization-Id header; expected UUID.") from exc
+    allowed_statuses_tuple = tuple(allowed_org_statuses)
 
     membership_stmt = (
         select(OrganizationMembership)
@@ -179,7 +206,7 @@ def get_tenant_context(
         .where(
             OrganizationMembership.user_id == principal.user_id,
             OrganizationMembership.membership_status == MembershipStatus.ACTIVE.value,
-            Organization.status == OrganizationStatus.ACTIVE.value,
+            Organization.status.in_(allowed_statuses_tuple),
         )
     )
     if requested_org_id is not None:
@@ -228,6 +255,7 @@ def get_tenant_context(
 
     role_ids = {ra.role_id for ra in role_assignments}
     role_codes: Set[str] = set()
+    role_by_id: Dict[uuid.UUID, str] = {}
     permission_codes: Set[str] = set()
     if role_ids:
         roles = db.scalars(
@@ -235,6 +263,7 @@ def get_tenant_context(
         ).all()
         active_role_ids = {r.id for r in roles}
         role_codes = {r.role_code for r in roles}
+        role_by_id = {r.id: r.role_code for r in roles}
         if active_role_ids:
             perms = db.scalars(
                 select(Permission.permission_code)
@@ -258,25 +287,19 @@ def get_tenant_context(
     ]
     assigned_site_ids = {sa.site_id for sa in site_assignments}
 
-    role_by_id = {}
-    if role_ids:
-        for r in db.scalars(select(Role).where(Role.id.in_(role_ids), Role.status == "ACTIVE")).all():
-            role_by_id[r.id] = r.role_code
-
     is_org_wide = any(
         ra.scope_type == RoleAssignmentScopeType.ORGANIZATION.value
-        and role_by_id.get(ra.role_id) in ORG_WIDE_ROLES
+        and role_by_id.get(ra.role_id) in org_wide_roles
         for ra in role_assignments
     )
 
     if is_org_wide:
-        active_org_sites = db.scalars(
-            select(Site.id).where(
-                Site.organization_id == org_id,
-                Site.status == SiteStatus.ACTIVE.value,
-            )
-        ).all()
-        allowed_site_ids = frozenset(active_org_sites)
+        site_stmt = select(Site.id).where(Site.organization_id == org_id)
+        if include_non_suspended_sites:
+            site_stmt = site_stmt.where(Site.status != SiteStatus.SUSPENDED.value)
+        else:
+            site_stmt = site_stmt.where(Site.status == SiteStatus.ACTIVE.value)
+        allowed_site_ids = frozenset(db.scalars(site_stmt).all())
     else:
         role_site_ids = {
             ra.site_id
@@ -300,28 +323,214 @@ def get_tenant_context(
     )
 
 
+def get_tenant_context(
+    request: Request,
+    principal: Principal = Depends(get_current_principal),
+    x_organization_id: Optional[str] = Header(default=None, alias="X-Organization-Id"),
+    db: Session = Depends(get_db),
+) -> TenantContext:
+    requested_org_id = _parse_org_uuid(x_organization_id, "X-Organization-Id header")
+    return _resolve_tenant_context(
+        request,
+        principal,
+        requested_org_id,
+        db,
+        allowed_org_statuses=(OrganizationStatus.ACTIVE.value,),
+        include_non_suspended_sites=False,
+        org_wide_roles=ORG_WIDE_ROLES,
+    )
+
+
+def get_onboarding_tenant_context(
+    request: Request,
+    principal: Principal = Depends(get_current_principal),
+    x_organization_id: Optional[str] = Header(default=None, alias="X-Organization-Id"),
+    db: Session = Depends(get_db),
+) -> TenantContext:
+    """
+    Resolves tenant context for organization/site onboarding routes where the org may
+    still be in DRAFT/SUBMITTED/UNDER_REVIEW/NEEDS_INFORMATION or ACTIVE status.
+    """
+    header_org_id = _parse_org_uuid(x_organization_id, "X-Organization-Id header")
+    path_raw = request.path_params.get("organization_id")
+    path_org_id = _parse_org_uuid(str(path_raw), "organization_id path parameter") if path_raw is not None else None
+
+    if header_org_id is not None and path_org_id is not None and header_org_id != path_org_id:
+        db.rollback()
+        _record_auth_failure(
+            request,
+            event_type="TENANT_HEADER_MISMATCH",
+            user_id=principal.user_id,
+            organization_id=path_org_id,
+            severity=SecurityEventSeverity.HIGH.value,
+            details={"header_org_id": str(header_org_id)},
+        )
+        raise PermissionDeniedError(
+            "X-Organization-Id header does not match target organization.",
+            error_code="TENANT_HEADER_MISMATCH",
+        )
+
+    requested_org_id = path_org_id or header_org_id
+    return _resolve_tenant_context(
+        request,
+        principal,
+        requested_org_id,
+        db,
+        allowed_org_statuses=_ONBOARDING_ORG_STATUSES,
+        include_non_suspended_sites=True,
+        org_wide_roles=_ONBOARDING_ORG_WIDE_ROLES,
+    )
+
+
+def _enforce_permission(
+    request: Request,
+    tenant_ctx: TenantContext,
+    permission_code: str,
+    db: Session,
+) -> TenantContext:
+    if permission_code not in tenant_ctx.permission_codes:
+        db.rollback()
+        _record_auth_failure(
+            request,
+            event_type="RBAC_PERMISSION_DENIED",
+            user_id=tenant_ctx.user_id,
+            organization_id=tenant_ctx.organization_id,
+            severity=SecurityEventSeverity.WARNING.value,
+            details={"required_permission": permission_code},
+        )
+        raise PermissionDeniedError(
+            f"Missing required permission '{permission_code}'.",
+            error_code="INSUFFICIENT_PERMISSION",
+        )
+    return tenant_ctx
+
+
 def require_permission(permission_code: str) -> Callable[..., TenantContext]:
-    """Dependency factory enforcing an atomic permission inside the verified TenantContext."""
+    """Dependency factory enforcing an atomic permission inside the verified operational TenantContext."""
 
     def _dependency(
         request: Request,
         tenant_ctx: TenantContext = Depends(get_tenant_context),
         db: Session = Depends(get_db),
     ) -> TenantContext:
-        if permission_code not in tenant_ctx.permission_codes:
+        return _enforce_permission(request, tenant_ctx, permission_code, db)
+
+    return _dependency
+
+
+def require_onboarding_permission(permission_code: str) -> Callable[..., TenantContext]:
+    """Dependency factory enforcing an atomic permission inside the pre-activation onboarding TenantContext."""
+
+    def _dependency(
+        request: Request,
+        tenant_ctx: TenantContext = Depends(get_onboarding_tenant_context),
+        db: Session = Depends(get_db),
+    ) -> TenantContext:
+        return _enforce_permission(request, tenant_ctx, permission_code, db)
+
+    return _dependency
+
+
+def get_platform_principal(
+    request: Request,
+    principal: Principal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+) -> Principal:
+    """Authenticates and enforces platform-level PLATFORM_SUPER_ADMIN access."""
+    if principal.platform_role != "PLATFORM_SUPER_ADMIN":
+        db.rollback()
+        _record_auth_failure(
+            request,
+            event_type="PLATFORM_PERMISSION_DENIED",
+            user_id=principal.user_id,
+            severity=SecurityEventSeverity.HIGH.value,
+            details={"platform_role": principal.platform_role},
+        )
+        raise PermissionDeniedError(
+            "Platform super-admin role required.",
+            error_code="PLATFORM_PERMISSION_DENIED",
+        )
+    return principal
+
+
+def require_platform_permission(permission_code: str) -> Callable[..., Principal]:
+    """Dependency factory enforcing a PLATFORM_SUPER_ADMIN role permission via RBAC tables."""
+
+    def _dependency(
+        request: Request,
+        principal: Principal = Depends(get_platform_principal),
+        db: Session = Depends(get_db),
+    ) -> Principal:
+        perms = set(
+            db.scalars(
+                select(Permission.permission_code)
+                .join(RolePermission, RolePermission.permission_id == Permission.id)
+                .join(Role, Role.id == RolePermission.role_id)
+                .where(Role.role_code == "PLATFORM_SUPER_ADMIN", Role.status == "ACTIVE")
+            ).all()
+        )
+        if permission_code not in perms:
             db.rollback()
             _record_auth_failure(
                 request,
-                event_type="RBAC_PERMISSION_DENIED",
-                user_id=tenant_ctx.user_id,
-                organization_id=tenant_ctx.organization_id,
-                severity=SecurityEventSeverity.WARNING.value,
+                event_type="PLATFORM_PERMISSION_DENIED",
+                user_id=principal.user_id,
+                severity=SecurityEventSeverity.HIGH.value,
                 details={"required_permission": permission_code},
             )
             raise PermissionDeniedError(
-                f"Missing required permission '{permission_code}'.",
+                f"Missing required platform permission '{permission_code}'.",
                 error_code="INSUFFICIENT_PERMISSION",
             )
-        return tenant_ctx
+        return principal
+
+    return _dependency
+
+
+class SlidingWindowRateLimiter:
+    """Thread-safe in-memory sliding-window rate limiter keyed by (scope, client_ip)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._buckets: Dict[Tuple[str, str], Deque[float]] = {}
+
+    def check(self, scope: str, client_key: str, *, max_requests: int, window_seconds: int) -> None:
+        now = time.monotonic()
+        cutoff = now - float(window_seconds)
+        key = (scope, client_key)
+        with self._lock:
+            dq = self._buckets.setdefault(key, deque())
+            while dq and dq[0] <= cutoff:
+                dq.popleft()
+            if len(dq) >= max_requests:
+                raise RateLimitError(
+                    f"Rate limit exceeded for '{scope}'; please retry later.",
+                    details={"scope": scope, "retry_after_seconds": window_seconds},
+                )
+            dq.append(now)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._buckets.clear()
+
+
+_rate_limiter = SlidingWindowRateLimiter()
+
+
+def reset_rate_limiter() -> None:
+    """Clears sliding-window buckets (primarily for isolated tests)."""
+    _rate_limiter.reset()
+
+
+def rate_limit(scope: str, max_requests: int = 20, window_seconds: int = 60) -> Callable[..., None]:
+    """FastAPI dependency enforcing a thread-safe in-memory sliding-window rate limit."""
+
+    def _dependency(request: Request) -> None:
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[0].strip() or "unknown"
+        else:
+            client_ip = request.client.host if request.client else "unknown"
+        _rate_limiter.check(scope, client_ip, max_requests=max_requests, window_seconds=window_seconds)
 
     return _dependency

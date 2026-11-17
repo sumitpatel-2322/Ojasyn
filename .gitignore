@@ -1,12 +1,20 @@
 # ============================
 # Environment variables / secrets
 # ============================
-.env
-.env.*
-backend/.env
-backend/.env.*
+# Ignore real environment files everywhere, but keep safe templates.
+**/.env
+**/.env.*
 !**/.env.example
-.vscode/
+Backend Architecture & Database Specification.docx
+Module Catalogue.docx
+Module Gap Analysis & Development Workflow.md
+Product Vision.docx
+# Private keys and local certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
 # ============================
 # Python (backend)
 # ============================
@@ -15,17 +23,26 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# Virtual environments
 env/
 venv/
 .venv/
 ENV/
+.conda/
+
+# Python packaging / tooling
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# Conda (environment.yml is fine to keep, but not local envs)
-.conda/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
 # ============================
 # Node / React / Vite (frontend)
@@ -45,13 +62,13 @@ pnpm-debug.log*
 # ============================
 backend/uploads/
 *.db
+*.sqlite
 *.sqlite3
 
 # ============================
 # IDE / Editor
 # ============================
-.vscode/*
-!.vscode/settings.json
+.vscode/
 .idea/
 *.swp
 *.swo
@@ -61,8 +78,11 @@ backend/uploads/
 # ============================
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # ============================
-# Logs
+# Logs and temporary files
 # ============================
 *.log
+*.tmp
+*.temp

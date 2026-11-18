@@ -119,6 +119,17 @@ _DEFAULT_DOMAIN_RELAY_EVENTS = (
     "SiteReviewed",
     "PartnerUserInvited",
     "InvitationCreated",
+    "ProductCreated",
+    "ProductStatusChanged",
+    "MaterialCreated",
+    "MaterialStatusChanged",
+    "SupplierLotStatusChanged",
+    "BatchCreated",
+    "BatchStatusChanged",
+    "BatchDispositionDecided",
+    "ShipmentCreated",
+    "ShipmentDispatched",
+    "ShipmentReceived",
 )
 
 

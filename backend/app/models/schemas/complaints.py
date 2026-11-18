@@ -241,6 +241,7 @@ class ComplaintPublicStatusResponse(BaseModel):
 
 class ComplaintUpdateRequest(BaseModel):
     row_version: int = Field(..., ge=1)
+    product_id: Optional[uuid.UUID] = None
     reported_product_name: Optional[str] = Field(default=None, max_length=200)
     reported_batch_number: Optional[str] = Field(default=None, max_length=100)
     reported_manufacturer: Optional[str] = Field(default=None, max_length=200)

@@ -54,7 +54,9 @@ from app.models.domain.complaints import (
     SLAClock,
 )
 from app.models.domain.identity import OrganizationMembership
+from app.models.domain.products_materials import Product
 from app.models.domain.tenancy import Organization, Site
+from app.models.domain.traceability import Batch
 from app.models.schemas.complaints import (
     AITriageOutput,
     BatchResolutionRequest,
@@ -357,6 +359,18 @@ class ComplaintService:
             if site is None:
                 raise NotFoundError("Site not found in target organization.")
 
+        if payload.product_id is not None:
+            if target_org_id is None:
+                raise ValidationError("product_id cannot be specified without an active organization_id.")
+            product = db.scalar(
+                select(Product).where(
+                    Product.organization_id == target_org_id,
+                    Product.id == payload.product_id,
+                )
+            )
+            if product is None:
+                raise NotFoundError("Product not found in target organization.")
+
         effective_key = (idempotency_key or payload.idempotency_key or "").strip() or None
         canonical_payload = payload.model_dump(mode="json", exclude={"idempotency_key"})
         payload_hash = compute_record_hash(canonical_payload)
@@ -544,9 +558,20 @@ class ComplaintService:
             if site is None:
                 raise NotFoundError("Site not found in this organization.")
 
+        if payload.product_id is not None:
+            product = db.scalar(
+                select(Product).where(
+                    Product.organization_id == tenant_ctx.organization_id,
+                    Product.id == payload.product_id,
+                )
+            )
+            if product is None:
+                raise NotFoundError("Product not found in this organization.")
+
         with UnitOfWork(db):
             verify_and_increment_version(complaint, payload.row_version)
             for field in (
+                "product_id",
                 "reported_product_name",
                 "reported_batch_number",
                 "reported_manufacturer",
@@ -921,6 +946,15 @@ class ComplaintService:
                 )
                 if link is None:
                     raise NotFoundError("Batch candidate link not found.")
+                if link.batch_id is not None:
+                    linked_batch = db.scalar(
+                        select(Batch).where(
+                            Batch.organization_id == tenant_ctx.organization_id,
+                            Batch.id == link.batch_id,
+                        )
+                    )
+                    if linked_batch is None:
+                        raise NotFoundError("Linked batch not found in this organization.")
                 link.match_status = BatchMatchStatus.VERIFIED.value
                 link.verified_by_membership_id = tenant_ctx.membership_id
                 link.verified_at = now
@@ -929,11 +963,26 @@ class ComplaintService:
             elif payload.action == "MANUAL_LINK":
                 if payload.batch_id is None and not payload.reported_batch_number:
                     raise ValidationError("Provide batch_id or reported_batch_number for MANUAL_LINK.")
+                linked_batch: Optional[Batch] = None
+                if payload.batch_id is not None:
+                    linked_batch = db.scalar(
+                        select(Batch).where(
+                            Batch.organization_id == tenant_ctx.organization_id,
+                            Batch.id == payload.batch_id,
+                        )
+                    )
+                    if linked_batch is None:
+                        raise NotFoundError("Batch not found in this organization.")
+                resolved_batch_number = (
+                    payload.reported_batch_number
+                    or complaint.reported_batch_number
+                    or (linked_batch.batch_number if linked_batch is not None else None)
+                )
                 link = ComplaintBatchLink(
                     organization_id=tenant_ctx.organization_id,
                     complaint_id=complaint.id,
                     batch_id=payload.batch_id,
-                    reported_batch_number=payload.reported_batch_number or complaint.reported_batch_number,
+                    reported_batch_number=resolved_batch_number,
                     resolution_outcome=BatchResolutionOutcome.MANUAL_LINKED.value,
                     match_method="MANUAL",
                     match_status=BatchMatchStatus.MANUAL_LINK.value,

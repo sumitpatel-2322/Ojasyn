@@ -62,6 +62,12 @@ class Complaint(UUIDPKMixin, TimestampVersionMixin, Base):
             ondelete="RESTRICT",
             name="fk_complaints_org_owner_membership",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "product_id"],
+            ["products.organization_id", "products.id"],
+            ondelete="RESTRICT",
+            name="fk_complaints_org_product",
+        ),
         Index(
             "ix_complaints_org_idempotency",
             "organization_id",
@@ -112,8 +118,12 @@ class Complaint(UUIDPKMixin, TimestampVersionMixin, Base):
     idempotency_payload_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     tracking_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
-    # Nullable UUID without DB FK until Phase 3 migration creates products table
-    product_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    product_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("products.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     reported_product_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     reported_batch_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     reported_manufacturer: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -266,6 +276,12 @@ class ComplaintBatchLink(UUIDPKMixin, TimestampVersionMixin, Base):
             ondelete="RESTRICT",
             name="fk_complaint_batch_links_org_verifier",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "batch_id"],
+            ["batches.organization_id", "batches.id"],
+            ondelete="RESTRICT",
+            name="fk_complaint_batch_links_org_batch",
+        ),
     )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
@@ -280,8 +296,12 @@ class ComplaintBatchLink(UUIDPKMixin, TimestampVersionMixin, Base):
         nullable=False,
         index=True,
     )
-    # Nullable UUID without DB FK until Phase 3 creates batches table
-    batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("batches.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     reported_batch_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     resolution_outcome: Mapped[str] = mapped_column(String(40), nullable=False)
     match_method: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)

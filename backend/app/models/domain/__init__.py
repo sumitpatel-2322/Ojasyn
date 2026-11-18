@@ -52,6 +52,13 @@ from app.models.domain.master_data import (
     ReferenceValue,
     UnitOfMeasure,
 )
+from app.models.domain.products_materials import (
+    Material,
+    Product,
+    ProductAuthorization,
+    ProductMaterialBill,
+    SupplierLot,
+)
 from app.models.domain.tenancy import (
     Department,
     Organization,
@@ -60,6 +67,17 @@ from app.models.domain.tenancy import (
     OrganizationSequence,
     Site,
     SiteLicense,
+)
+from app.models.domain.traceability import (
+    Batch,
+    BatchDisposition,
+    BatchDocumentLink,
+    BatchMaterialConsumption,
+    BatchMovementEvent,
+    BatchRelationship,
+    BatchStatusHistory,
+    Shipment,
+    ShipmentLine,
 )
 
 __all__ = [
@@ -106,6 +124,20 @@ __all__ = [
     "ComplaintCommunication",
     "CopilotSession",
     "CopilotMessage",
+    "Product",
+    "ProductAuthorization",
+    "Material",
+    "ProductMaterialBill",
+    "SupplierLot",
+    "Batch",
+    "BatchStatusHistory",
+    "BatchDisposition",
+    "BatchMaterialConsumption",
+    "BatchRelationship",
+    "BatchDocumentLink",
+    "Shipment",
+    "ShipmentLine",
+    "BatchMovementEvent",
     "Notification",
     "OutboxEvent",
     "AuditEvent",

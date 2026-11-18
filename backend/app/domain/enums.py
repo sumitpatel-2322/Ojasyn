@@ -320,10 +320,116 @@ class BatchStatus(str, Enum):
     PLANNED = "PLANNED"
     IN_PROCESS = "IN_PROCESS"
     QUARANTINED = "QUARANTINED"
+    UNDER_QUALITY_REVIEW = "UNDER_QUALITY_REVIEW"
     RELEASED = "RELEASED"
     REJECTED = "REJECTED"
+    REWORKED = "REWORKED"
     RECALLED = "RECALLED"
     EXPIRED = "EXPIRED"
+
+
+class ProductStatus(str, Enum):
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    DISCONTINUED = "DISCONTINUED"
+    BLOCKED = "BLOCKED"
+
+
+class RegulatoryAuthorizationStatus(str, Enum):
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    WITHDRAWN = "WITHDRAWN"
+
+
+ProductRegulatoryStatus = RegulatoryAuthorizationStatus
+
+
+class MaterialType(str, Enum):
+    API = "API"
+    EXCIPIENT = "EXCIPIENT"
+    PACKAGING_PRIMARY = "PACKAGING_PRIMARY"
+    PACKAGING_SECONDARY = "PACKAGING_SECONDARY"
+    SOLVENT = "SOLVENT"
+    REAGENT = "REAGENT"
+    OTHER = "OTHER"
+
+
+class MaterialQualificationStatus(str, Enum):
+    DRAFT = "DRAFT"
+    UNDER_QUALIFICATION = "UNDER_QUALIFICATION"
+    APPROVED = "APPROVED"
+    DISQUALIFIED = "DISQUALIFIED"
+    OBSOLETE = "OBSOLETE"
+
+
+class MaterialStatus(str, Enum):
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    BLOCKED = "BLOCKED"
+    DISCONTINUED = "DISCONTINUED"
+
+
+class SupplierLotStatus(str, Enum):
+    QUARANTINED = "QUARANTINED"
+    RELEASED = "RELEASED"
+    REJECTED = "REJECTED"
+    EXHAUSTED = "EXHAUSTED"
+    BLOCKED = "BLOCKED"
+
+
+class QualityReviewStatus(str, Enum):
+    PENDING = "PENDING"
+    IN_REVIEW = "IN_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    HOLD = "HOLD"
+
+
+class BatchDispositionDecision(str, Enum):
+    RELEASED = "RELEASED"
+    QUARANTINED = "QUARANTINED"
+    REJECTED = "REJECTED"
+    REWORKED = "REWORKED"
+
+
+class BatchRelationType(str, Enum):
+    SPLIT = "SPLIT"
+    MERGE = "MERGE"
+    REWORK = "REWORK"
+    REPACK = "REPACK"
+    CONVERSION = "CONVERSION"
+
+
+class BatchDocumentRole(str, Enum):
+    BMR = "BMR"
+    BPR = "BPR"
+    COA = "COA"
+    QC_RAW_DATA = "QC_RAW_DATA"
+    PACKAGING_RECORD = "PACKAGING_RECORD"
+    DISPOSITION_CERT = "DISPOSITION_CERT"
+    OTHER = "OTHER"
+
+
+class ShipmentStatus(str, Enum):
+    DRAFT = "DRAFT"
+    DISPATCHED = "DISPATCHED"
+    IN_TRANSIT = "IN_TRANSIT"
+    RECEIVED = "RECEIVED"
+    PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED"
+    CANCELLED = "CANCELLED"
+
+
+class BatchMovementEventType(str, Enum):
+    PRODUCED = "PRODUCED"
+    QUARANTINE_HOLD = "QUARANTINE_HOLD"
+    RELEASED = "RELEASED"
+    DISPATCH = "DISPATCH"
+    RECEIPT = "RECEIPT"
+    RETURN = "RETURN"
+    RECALL = "RECALL"
+    DISPOSAL = "DISPOSAL"
+    REWORK = "REWORK"
 
 
 class SOPRevisionStatus(str, Enum):

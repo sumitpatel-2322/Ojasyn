@@ -78,6 +78,12 @@ class Batch(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base):
             ondelete="RESTRICT",
             name="fk_batches_org_primary_doc",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "master_batch_record_id"],
+            ["master_batch_records.organization_id", "master_batch_records.id"],
+            ondelete="RESTRICT",
+            name="fk_batches_org_mbr",
+        ),
         Index("ix_batches_org_status", "organization_id", "batch_status"),
     )
 
@@ -122,9 +128,10 @@ class Batch(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base):
         ForeignKey("documents.id", ondelete="RESTRICT"),
         nullable=True,
     )
-    # Nullable UUID without DB FK until Phase 4 creates master_batch_records table
     master_batch_record_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        Uuid(as_uuid=True), nullable=True
+        Uuid(as_uuid=True),
+        ForeignKey("master_batch_records.id", ondelete="RESTRICT"),
+        nullable=True,
     )
 
     status_history: Mapped[List["BatchStatusHistory"]] = relationship(

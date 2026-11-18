@@ -52,12 +52,32 @@ from app.models.domain.master_data import (
     ReferenceValue,
     UnitOfMeasure,
 )
+from app.models.domain.manufacturing_execution import (
+    BatchExecutionRecord,
+    BatchExecutionStep,
+    DeterministicEvidenceCheck,
+    MasterBatchRecord,
+    ProcessParameterObservation,
+)
 from app.models.domain.products_materials import (
     Material,
     Product,
     ProductAuthorization,
     ProductMaterialBill,
     SupplierLot,
+)
+from app.models.domain.qc_equipment import (
+    CalibrationRecord,
+    Equipment,
+    EquipmentUsage,
+    QCSample,
+    QCTestDefinition,
+    QCTestResult,
+)
+from app.models.domain.sops import (
+    SOP,
+    SOPRevision,
+    SOPStep,
 )
 from app.models.domain.tenancy import (
     Department,
@@ -138,6 +158,20 @@ __all__ = [
     "Shipment",
     "ShipmentLine",
     "BatchMovementEvent",
+    "SOP",
+    "SOPRevision",
+    "SOPStep",
+    "MasterBatchRecord",
+    "BatchExecutionRecord",
+    "BatchExecutionStep",
+    "ProcessParameterObservation",
+    "DeterministicEvidenceCheck",
+    "QCTestDefinition",
+    "QCSample",
+    "QCTestResult",
+    "Equipment",
+    "CalibrationRecord",
+    "EquipmentUsage",
     "Notification",
     "OutboxEvent",
     "AuditEvent",

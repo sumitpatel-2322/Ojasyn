@@ -544,6 +544,12 @@ class TrainingRecord(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base
             ondelete="RESTRICT",
             name="fk_training_org_site",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "sop_revision_id"],
+            ["sop_revisions.organization_id", "sop_revisions.id"],
+            ondelete="RESTRICT",
+            name="fk_training_org_sop_rev",
+        ),
         CheckConstraint(
             "assessment_score IS NULL OR (assessment_score >= 0 AND assessment_score <= 100)",
             name="ck_training_score_range",
@@ -574,8 +580,11 @@ class TrainingRecord(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base
     )
     training_topic: Mapped[str] = mapped_column(String(200), nullable=False)
     training_method: Mapped[str] = mapped_column(String(40), nullable=False, default="CLASSROOM")
-    # Nullable UUIDs without DB FK until Phases 2/4 create documents and sop_revisions
-    sop_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    sop_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("sop_revisions.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     trainer_membership_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("organization_memberships.id", ondelete="RESTRICT"),

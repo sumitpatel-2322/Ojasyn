@@ -130,6 +130,10 @@ _DEFAULT_DOMAIN_RELAY_EVENTS = (
     "ShipmentCreated",
     "ShipmentDispatched",
     "ShipmentReceived",
+    "SOPCreated",
+    "SOPRevisionApproved",
+    "SOPRevisionRejected",
+    "SOPRevisionActivated",
 )
 
 

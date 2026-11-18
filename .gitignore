@@ -16,7 +16,15 @@ BACKEND_IMPLEMENTATION_PROGRESS.md
 *.key
 *.p12
 *.pfx
+**/.env.example
+# Environment variables and secrets
+.env
+.env.*
+!.env.template
 
+# Backend environment files
+/backend/.env
+/backend/.env.example
 # ============================
 # Python (backend)
 # ============================

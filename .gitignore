@@ -10,6 +10,8 @@ Module Catalogue.docx
 Module Gap Analysis & Development Workflow.md
 Product Vision.docx
 # Private keys and local certificates
+AGENTS.md
+BACKEND_IMPLEMENTATION_PROGRESS.md
 *.pem
 *.key
 *.p12

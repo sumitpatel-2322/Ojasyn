@@ -45,7 +45,12 @@ from app.models.domain.identity import (
     User,
 )
 from app.models.domain.tenancy import Organization, OrganizationAddress, Site
-from app.worker import OutboxWorker, fan_out_complaint_registered_notifications
+from app.worker import (
+    OutboxWorker,
+    _handle_complaint_registered,
+    build_worker_tenant_context,
+    fan_out_complaint_registered_notifications,
+)
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]
@@ -379,4 +384,120 @@ def test_expired_lockout_unlocks_via_isolated_uow(sqlite_db: dict) -> None:
         assert resp.user.account_status == UserAccountStatus.ACTIVE.value
     finally:
         db.close()
+
+
+def test_handle_complaint_registered_uses_real_complaint_orm_row(
+    sqlite_db: dict,
+    monkeypatch,
+) -> None:
+    from app.models.domain.complaints import Complaint
+    from app.models.domain.governance import OutboxEvent
+    from app.services.complaint_service import ComplaintService
+
+    session_factory = sqlite_db["session_factory"]
+    triage_called: list[uuid.UUID] = []
+
+    def _fake_triage(self, sf, event, ctx):
+        triage_called.append(event.aggregate_id)
+
+    monkeypatch.setattr(ComplaintService, "handle_outbox_async_triage", _fake_triage)
+
+    with UnitOfWork(session_factory) as uow:
+        assert uow.session is not None
+        db_session = uow.session
+        seed_rbac_catalog(db_session)
+
+        org = Organization(
+            legal_name="Real Complaint Org",
+            organization_type="MANUFACTURER",
+            business_email="realcomp@example.com",
+            status=OrganizationStatus.ACTIVE.value,
+        )
+        db_session.add(org)
+        db_session.flush()
+
+        addr = OrganizationAddress(
+            organization_id=org.id,
+            address_type="REGISTERED",
+            line_1="10 Quality Rd",
+            city="Pune",
+            state_region="MH",
+            postal_code="411001",
+            country_code="IN",
+        )
+        db_session.add(addr)
+        db_session.flush()
+
+        site = Site(
+            organization_id=org.id,
+            site_code="PUNE-1",
+            site_name="Pune Plant",
+            site_type=SiteType.MANUFACTURING.value,
+            address_id=addr.id,
+            status=SiteStatus.ACTIVE.value,
+        )
+        db_session.add(site)
+        db_session.flush()
+
+        qa_role = db_session.query(Role).filter(Role.role_code == "QA_HEAD").one()
+        qa_user = User(
+            email="qahead@example.com",
+            full_name="QA Head",
+            account_status=UserAccountStatus.ACTIVE.value,
+        )
+        db_session.add(qa_user)
+        db_session.flush()
+        qa_member = OrganizationMembership(
+            organization_id=org.id,
+            user_id=qa_user.id,
+            membership_status=MembershipStatus.ACTIVE.value,
+        )
+        db_session.add(qa_member)
+        db_session.flush()
+        db_session.add(
+            MembershipRoleAssignment(
+                organization_id=org.id,
+                membership_id=qa_member.id,
+                role_id=qa_role.id,
+                scope_type=RoleAssignmentScopeType.SITE.value,
+                site_id=site.id,
+                granted_by_user_id=qa_user.id,
+                status=RoleAssignmentStatus.ACTIVE.value,
+            )
+        )
+
+        complaint = Complaint(
+            organization_id=org.id,
+            site_id=site.id,
+            complaint_number="CMP-REAL-0001",
+            source_channel="WEBSITE",
+            reported_product_name="Paracetamol 500mg",
+            description="Blister foil torn on two strips in carton.",
+        )
+        db_session.add(complaint)
+        db_session.flush()
+        complaint_id = complaint.id
+        org_id = org.id
+        qa_member_id = qa_member.id
+
+    ev = OutboxEvent(
+        id=uuid.uuid4(),
+        organization_id=org_id,
+        event_type="ComplaintRegistered",
+        aggregate_type="complaints",
+        aggregate_id=complaint_id,
+        payload_json={},
+    )
+    ctx = build_worker_tenant_context(ev)
+    _handle_complaint_registered(session_factory, ev, ctx)
+
+    assert triage_called == [complaint_id]
+    with UnitOfWork(session_factory) as uow:
+        assert uow.session is not None
+        notifs = uow.session.query(Notification).filter(Notification.aggregate_id == complaint_id).all()
+        assert len(notifs) == 1
+        assert notifs[0].recipient_membership_id == qa_member_id
+        assert "Paracetamol 500mg" in notifs[0].body
+        assert "Blister foil torn" in notifs[0].body
+
 

@@ -157,13 +157,21 @@ def _handle_complaint_registered(
             assert uow.session is not None
             complaint = uow.session.get(Complaint, event.aggregate_id)
             if complaint is not None and complaint.organization_id == tenant_ctx.organization_id:
+                summary_parts = [
+                    part.strip()
+                    for part in (
+                        complaint.reported_product_name,
+                        (complaint.description or "")[:200],
+                    )
+                    if part and part.strip()
+                ]
                 fan_out_complaint_registered_notifications(
                     uow.session,
                     organization_id=tenant_ctx.organization_id,
                     complaint_id=complaint.id,
                     site_id=complaint.site_id,
                     complaint_number=complaint.complaint_number,
-                    title=complaint.title,
+                    title=" — ".join(summary_parts) if summary_parts else None,
                 )
 
     _handle_complaint_async_triage(session_factory, event, tenant_ctx)

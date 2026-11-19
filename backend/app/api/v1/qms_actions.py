@@ -9,6 +9,21 @@ from app.core.exceptions import PermissionDeniedError
 from app.domain.enums import DeviationClassification, SecurityEventOutcome, SecurityEventSeverity
 from app.models.schemas.common import Page
 from app.models.schemas.qms_loop import (
+    CAPAActionCompleteRequest,
+    CAPAActionCreateRequest,
+    CAPAActionResponse,
+    CAPAActionUpdateRequest,
+    CAPACloseRequest,
+    CAPACreateRequest,
+    CAPADetailResponse,
+    CAPAEffectivenessCheckCreateRequest,
+    CAPAEffectivenessCheckRecordRequest,
+    CAPAEffectivenessCheckResponse,
+    CAPAOpenRequest,
+    CAPAOverdueCheckResponse,
+    CAPAResponse,
+    CAPASubmitEffectivenessRequest,
+    CAPAUpdateRequest,
     DeviationCloseRequest,
     DeviationCreateRequest,
     DeviationResponse,
@@ -199,3 +214,287 @@ def close_deviation(
         source_ip=_client_ip(request),
     )
     return DeviationResponse.model_validate(dev)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 (E3): CAPA, CAPA Actions & Effectiveness Checks Routes
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/capas",
+    response_model=CAPAResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_capa(
+    request: Request,
+    payload: CAPACreateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.manage")),
+    db: Session = Depends(get_db),
+) -> CAPAResponse:
+    capa = _svc.create_capa(
+        db, tenant_ctx=tenant_ctx, payload=payload, source_ip=_client_ip(request)
+    )
+    return CAPAResponse.model_validate(capa)
+
+
+@router.get("/capas", response_model=Page[CAPAResponse])
+def list_capas(
+    capa_status: Optional[str] = Query(default=None, alias="status"),
+    capa_type: Optional[str] = Query(default=None),
+    source_type: Optional[str] = Query(default=None),
+    severity: Optional[str] = Query(default=None),
+    complaint_id: Optional[uuid.UUID] = Query(default=None),
+    investigation_id: Optional[uuid.UUID] = Query(default=None),
+    deviation_id: Optional[uuid.UUID] = Query(default=None),
+    site_id: Optional[uuid.UUID] = Query(default=None),
+    owner_membership_id: Optional[uuid.UUID] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    tenant_ctx: TenantContext = Depends(require_permission("capa.read")),
+    db: Session = Depends(get_db),
+) -> Page[CAPAResponse]:
+    items, total = _svc.list_capas(
+        db,
+        tenant_ctx=tenant_ctx,
+        status=capa_status,
+        capa_type=capa_type,
+        source_type=source_type,
+        severity=severity,
+        complaint_id=complaint_id,
+        investigation_id=investigation_id,
+        deviation_id=deviation_id,
+        site_id=site_id,
+        owner_membership_id=owner_membership_id,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[CAPAResponse.model_validate(c) for c in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post(
+    "/capas/check-overdue",
+    response_model=CAPAOverdueCheckResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def check_overdue_capas(
+    request: Request,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.manage")),
+    db: Session = Depends(get_db),
+) -> CAPAOverdueCheckResponse:
+    capa_ids, event_ids = _svc.check_overdue_capas(
+        db, tenant_ctx=tenant_ctx, source_ip=_client_ip(request)
+    )
+    return CAPAOverdueCheckResponse(
+        enqueued_count=len(event_ids),
+        overdue_capa_ids=capa_ids,
+        outbox_event_ids=event_ids,
+    )
+
+
+@router.get("/capas/{capa_id}", response_model=CAPADetailResponse)
+def get_capa(
+    request: Request,
+    capa_id: uuid.UUID,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.read")),
+    db: Session = Depends(get_db),
+) -> CAPADetailResponse:
+    capa, actions, checks = _svc.get_capa_detail(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        source_ip=_client_ip(request),
+    )
+    base = CAPAResponse.model_validate(capa).model_dump()
+    return CAPADetailResponse(
+        **base,
+        actions=[CAPAActionResponse.model_validate(a) for a in actions],
+        effectiveness_checks=[CAPAEffectivenessCheckResponse.model_validate(c) for c in checks],
+    )
+
+
+@router.patch("/capas/{capa_id}", response_model=CAPAResponse)
+def update_capa(
+    request: Request,
+    capa_id: uuid.UUID,
+    payload: CAPAUpdateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.manage")),
+    db: Session = Depends(get_db),
+) -> CAPAResponse:
+    capa = _svc.update_capa(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAResponse.model_validate(capa)
+
+
+@router.post("/capas/{capa_id}/open", response_model=CAPAResponse)
+def open_capa(
+    request: Request,
+    capa_id: uuid.UUID,
+    payload: CAPAOpenRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.approve")),
+    db: Session = Depends(get_db),
+) -> CAPAResponse:
+    capa = _svc.open_capa(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAResponse.model_validate(capa)
+
+
+@router.post(
+    "/capas/{capa_id}/actions",
+    response_model=CAPAActionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_capa_action(
+    request: Request,
+    capa_id: uuid.UUID,
+    payload: CAPAActionCreateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.manage")),
+    db: Session = Depends(get_db),
+) -> CAPAActionResponse:
+    action = _svc.add_capa_action(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAActionResponse.model_validate(action)
+
+
+@router.patch("/capas/{capa_id}/actions/{action_id}", response_model=CAPAActionResponse)
+def update_capa_action(
+    request: Request,
+    capa_id: uuid.UUID,
+    action_id: uuid.UUID,
+    payload: CAPAActionUpdateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.manage")),
+    db: Session = Depends(get_db),
+) -> CAPAActionResponse:
+    action = _svc.update_capa_action(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        action_id=action_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAActionResponse.model_validate(action)
+
+
+@router.post(
+    "/capas/{capa_id}/actions/{action_id}/complete",
+    response_model=CAPAActionResponse,
+)
+def complete_capa_action(
+    request: Request,
+    capa_id: uuid.UUID,
+    action_id: uuid.UUID,
+    payload: CAPAActionCompleteRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.manage")),
+    db: Session = Depends(get_db),
+) -> CAPAActionResponse:
+    action = _svc.complete_capa_action(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        action_id=action_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAActionResponse.model_validate(action)
+
+
+@router.post("/capas/{capa_id}/submit-effectiveness", response_model=CAPAResponse)
+def submit_capa_for_effectiveness(
+    request: Request,
+    capa_id: uuid.UUID,
+    payload: CAPASubmitEffectivenessRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.manage")),
+    db: Session = Depends(get_db),
+) -> CAPAResponse:
+    capa = _svc.submit_for_effectiveness(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAResponse.model_validate(capa)
+
+
+@router.post(
+    "/capas/{capa_id}/effectiveness-checks",
+    response_model=CAPAEffectivenessCheckResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_capa_effectiveness_check(
+    request: Request,
+    capa_id: uuid.UUID,
+    payload: CAPAEffectivenessCheckCreateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.manage")),
+    db: Session = Depends(get_db),
+) -> CAPAEffectivenessCheckResponse:
+    check = _svc.create_effectiveness_check(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAEffectivenessCheckResponse.model_validate(check)
+
+
+@router.post(
+    "/capas/{capa_id}/effectiveness-checks/{check_id}/record",
+    response_model=CAPAEffectivenessCheckResponse,
+)
+def record_capa_effectiveness_check(
+    request: Request,
+    capa_id: uuid.UUID,
+    check_id: uuid.UUID,
+    payload: CAPAEffectivenessCheckRecordRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.effectiveness_review")),
+    db: Session = Depends(get_db),
+) -> CAPAEffectivenessCheckResponse:
+    check = _svc.record_effectiveness_check(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        check_id=check_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAEffectivenessCheckResponse.model_validate(check)
+
+
+@router.post("/capas/{capa_id}/close", response_model=CAPAResponse)
+def close_capa(
+    request: Request,
+    capa_id: uuid.UUID,
+    payload: CAPACloseRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("capa.close")),
+    db: Session = Depends(get_db),
+) -> CAPAResponse:
+    capa = _svc.close_capa(
+        db,
+        tenant_ctx=tenant_ctx,
+        capa_id=capa_id,
+        payload=payload,
+        source_ip=_client_ip(request),
+    )
+    return CAPAResponse.model_validate(capa)

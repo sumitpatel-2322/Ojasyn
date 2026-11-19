@@ -3,7 +3,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -26,12 +28,16 @@ from app.domain.enums import (
     BatchMatchStatus,
     ClassificationSource,
     CommunicationChannel,
+    CommunicationDeliveryStatus,
+    CommunicationType,
     ComplaintSource,
     ComplaintStatus,
     CopilotSessionStatus,
+    EmailProviderType,
+    InboundEmailTriageStatus,
     SLAStatus,
 )
-from app.models.domain.base import Base, TimestampVersionMixin, UUIDPKMixin, utcnow
+from app.models.domain.base import Base, TenantScopedMixin, TimestampVersionMixin, UUIDPKMixin, utcnow
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 
@@ -515,12 +521,23 @@ class ComplaintCommunication(UUIDPKMixin, TimestampVersionMixin, Base):
 
     __tablename__ = "complaint_communications"
     __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_complaint_comms_org_id_id"),
         ForeignKeyConstraint(
             ["organization_id", "complaint_id"],
             ["complaints.organization_id", "complaints.id"],
             ondelete="RESTRICT",
             name="fk_complaint_comms_org_complaint",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "in_reply_to_communication_id"],
+            ["complaint_communications.organization_id", "complaint_communications.id"],
+            ondelete="RESTRICT",
+            name="fk_complaint_comms_org_reply",
+        ),
+        CheckConstraint("attempt_count >= 0", name="ck_complaint_comms_attempt_non_neg"),
+        Index("ix_complaint_comms_org_comp_sent", "organization_id", "complaint_id", "sent_at"),
+        Index("ix_complaint_comms_delivery_status", "delivery_status"),
+        Index("ix_complaint_comms_in_reply_to", "in_reply_to_communication_id"),
     )
 
     organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -555,8 +572,44 @@ class ComplaintCommunication(UUIDPKMixin, TimestampVersionMixin, Base):
     is_information_request: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
+    # B6 delivery, template, and reply-threading fields (0007_phase6_comm_email_capa)
+    communication_type: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        default=CommunicationType.GENERAL.value,
+        server_default="GENERAL",
+    )
+    template_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    recipient_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    recipient_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    delivery_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default=CommunicationDeliveryStatus.NOT_APPLICABLE.value,
+        server_default="NOT_APPLICABLE",
+    )
+    provider_message_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    in_reply_to_communication_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(
+            "complaint_communications.id",
+            ondelete="RESTRICT",
+            name="fk_complaint_comms_in_reply_to",
+        ),
+        nullable=True,
+    )
+    metadata_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONType, nullable=True)
+
     complaint: Mapped["Complaint"] = relationship(
         "Complaint", back_populates="communications", foreign_keys=[complaint_id]
+    )
+    in_reply_to: Mapped[Optional["ComplaintCommunication"]] = relationship(
+        "ComplaintCommunication",
+        remote_side="ComplaintCommunication.id",
+        foreign_keys=[in_reply_to_communication_id],
     )
 
 
@@ -624,4 +677,287 @@ class CopilotMessage(UUIDPKMixin, Base):
 
     session: Mapped["CopilotSession"] = relationship(
         "CopilotSession", back_populates="messages", foreign_keys=[session_id]
+    )
+
+
+class EmailConnection(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base):
+    """Tenant mailbox / webhook configuration for B7 inbound & outbound email intake."""
+
+    __tablename__ = "email_connections"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_email_conns_org_id_id"),
+        UniqueConstraint("organization_id", "mailbox_address", name="uq_email_conns_org_mailbox"),
+        ForeignKeyConstraint(
+            ["organization_id", "default_site_id"],
+            ["sites.organization_id", "sites.id"],
+            ondelete="RESTRICT",
+            name="fk_email_conns_org_site",
+        ),
+        CheckConstraint(
+            "auto_create_threshold >= 0 AND auto_create_threshold <= 1",
+            name="ck_email_conns_threshold_range",
+        ),
+        Index("ix_email_connections_org_active", "organization_id", "is_active"),
+    )
+
+    default_site_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("sites.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_type: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default=EmailProviderType.MOCK.value,
+        server_default="MOCK",
+    )
+    mailbox_address: Mapped[str] = mapped_column(String(255), nullable=False)
+    inbound_secret_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=sa.true(),
+    )
+    auto_create_threshold: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        nullable=False,
+        default=Decimal("0.7500"),
+        server_default="0.7500",
+    )
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    sync_cursor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    config_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONType, nullable=True)
+
+    inbound_emails: Mapped[List["InboundEmail"]] = relationship(
+        "InboundEmail",
+        back_populates="connection",
+        foreign_keys="InboundEmail.email_connection_id",
+    )
+
+
+class InboundEmail(UUIDPKMixin, TenantScopedMixin, TimestampVersionMixin, Base):
+    """Deduplicated inbound email persisted for AI classification and human/auto triage."""
+
+    __tablename__ = "inbound_emails"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_inbound_emails_org_id_id"),
+        UniqueConstraint("organization_id", "provider_message_id", name="uq_inbound_emails_org_msg_id"),
+        ForeignKeyConstraint(
+            ["organization_id", "email_connection_id"],
+            ["email_connections.organization_id", "email_connections.id"],
+            ondelete="RESTRICT",
+            name="fk_inbound_emails_org_conn",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "complaint_id"],
+            ["complaints.organization_id", "complaints.id"],
+            ondelete="RESTRICT",
+            name="fk_inbound_emails_org_complaint",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "triaged_by_membership_id"],
+            ["organization_memberships.organization_id", "organization_memberships.id"],
+            ondelete="RESTRICT",
+            name="fk_inbound_emails_org_triager",
+        ),
+        CheckConstraint(
+            "classification_confidence IS NULL OR (classification_confidence >= 0 AND classification_confidence <= 1)",
+            name="ck_inbound_emails_conf_range",
+        ),
+        Index(
+            "ix_inbound_emails_org_triage_recv",
+            "organization_id",
+            "triage_status",
+            "received_at",
+        ),
+        Index("ix_inbound_emails_org_thread", "organization_id", "thread_id"),
+    )
+
+    email_connection_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("email_connections.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    provider_message_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    thread_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    in_reply_to_header: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    from_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    to_addresses_json: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
+    cc_addresses_json: Mapped[Optional[Any]] = mapped_column(JSONType, nullable=True)
+    subject: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    body_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    body_html_sanitized: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utcnow,
+        server_default=sa.func.now(),
+    )
+    classification: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    classification_confidence: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4), nullable=True)
+    classification_rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    triage_status: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        default=InboundEmailTriageStatus.RECEIVED.value,
+        server_default="RECEIVED",
+        index=True,
+    )
+    complaint_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("complaints.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    triaged_by_membership_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organization_memberships.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    triaged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    triage_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    raw_headers_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONType, nullable=True)
+
+    connection: Mapped["EmailConnection"] = relationship(
+        "EmailConnection",
+        back_populates="inbound_emails",
+        foreign_keys=[email_connection_id],
+    )
+    attachments: Mapped[List["EmailAttachment"]] = relationship(
+        "EmailAttachment",
+        back_populates="inbound_email",
+        order_by="EmailAttachment.created_at.asc()",
+        foreign_keys="EmailAttachment.inbound_email_id",
+    )
+    processing_attempts: Mapped[List["EmailProcessingAttempt"]] = relationship(
+        "EmailProcessingAttempt",
+        back_populates="inbound_email",
+        order_by="EmailProcessingAttempt.attempt_number.asc()",
+        foreign_keys="EmailProcessingAttempt.inbound_email_id",
+    )
+
+
+class EmailAttachment(UUIDPKMixin, TenantScopedMixin, Base):
+    """Email attachment metadata linked to central Document Vault artifacts."""
+
+    __tablename__ = "email_attachments"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_email_att_org_id_id"),
+        ForeignKeyConstraint(
+            ["organization_id", "inbound_email_id"],
+            ["inbound_emails.organization_id", "inbound_emails.id"],
+            ondelete="RESTRICT",
+            name="fk_email_att_org_inbound",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "document_id"],
+            ["documents.organization_id", "documents.id"],
+            ondelete="RESTRICT",
+            name="fk_email_att_org_doc",
+        ),
+        CheckConstraint("byte_size >= 0", name="ck_email_att_byte_size_non_neg"),
+    )
+
+    inbound_email_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("inbound_emails.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("documents.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    document_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("document_versions.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    checksum_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    storage_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="PENDING", server_default="PENDING"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow, server_default=sa.func.now()
+    )
+    created_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    updated_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+    inbound_email: Mapped["InboundEmail"] = relationship(
+        "InboundEmail",
+        back_populates="attachments",
+        foreign_keys=[inbound_email_id],
+    )
+
+
+class EmailProcessingAttempt(UUIDPKMixin, Base):
+    """Append-only audit log of inbound email classification/processing attempts."""
+
+    __tablename__ = "email_processing_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "inbound_email_id",
+            "attempt_number",
+            name="uq_email_proc_org_email_att",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "inbound_email_id"],
+            ["inbound_emails.organization_id", "inbound_emails.id"],
+            ondelete="RESTRICT",
+            name="fk_email_proc_org_inbound",
+        ),
+        CheckConstraint("attempt_number >= 1", name="ck_email_proc_attempt_pos"),
+        Index("ix_email_proc_attempts_organization_id", "organization_id"),
+        Index("ix_email_proc_attempts_inbound_email_id", "inbound_email_id"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    inbound_email_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("inbound_emails.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    classifier_version: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, server_default=sa.func.now()
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, server_default=sa.func.now()
+    )
+
+    inbound_email: Mapped["InboundEmail"] = relationship(
+        "InboundEmail",
+        back_populates="processing_attempts",
+        foreign_keys=[inbound_email_id],
     )

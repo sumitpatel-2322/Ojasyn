@@ -18,6 +18,10 @@ from app.models.domain.complaints import (
     ComplaintEvent,
     CopilotMessage,
     CopilotSession,
+    EmailAttachment,
+    EmailConnection,
+    EmailProcessingAttempt,
+    InboundEmail,
     SLAClock,
 )
 from app.models.domain.documents import (
@@ -84,7 +88,12 @@ from app.models.domain.qc_equipment import (
     QCTestDefinition,
     QCTestResult,
 )
-from app.models.domain.qms_loop import Deviation
+from app.models.domain.qms_loop import (
+    CAPA,
+    CAPAAction,
+    CAPAEffectivenessCheck,
+    Deviation,
+)
 from app.models.domain.sops import (
     SOP,
     SOPRevision,
@@ -155,6 +164,10 @@ __all__ = [
     "ComplaintCommunication",
     "CopilotSession",
     "CopilotMessage",
+    "EmailConnection",
+    "InboundEmail",
+    "EmailAttachment",
+    "EmailProcessingAttempt",
     "Product",
     "ProductAuthorization",
     "Material",
@@ -192,6 +205,9 @@ __all__ = [
     "RootCauseHypothesis",
     "GeneratedReport",
     "Deviation",
+    "CAPA",
+    "CAPAAction",
+    "CAPAEffectivenessCheck",
     "Notification",
     "OutboxEvent",
     "AuditEvent",

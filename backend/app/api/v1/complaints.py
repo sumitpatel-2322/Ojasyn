@@ -16,9 +16,13 @@ from app.core.deps import (
     require_platform_permission,
 )
 from app.core.exceptions import AuthenticationError, PermissionDeniedError, ValidationError
+from app.domain.enums import InboundEmailTriageStatus
 from app.models.schemas.common import Page
 from app.models.schemas.complaints import (
+    AcknowledgementCreateRequest,
     BatchResolutionRequest,
+    ClosureMessageCreateRequest,
+    CommunicationReplyRequest,
     ComplaintAssignRequest,
     ComplaintAssignmentResponse,
     ComplaintAttachmentResponse,
@@ -38,7 +42,17 @@ from app.models.schemas.complaints import (
     CopilotMessageCreateRequest,
     CopilotSessionResponse,
     CopilotSubmitRequest,
+    EmailConnectionCreateRequest,
+    EmailConnectionResponse,
+    EmailConnectionSyncResponse,
+    EmailConnectionUpdateRequest,
+    InboundEmailDetailResponse,
+    InboundEmailSummaryResponse,
+    InboundEmailTriageRequest,
+    InboundEmailWebhookAckResponse,
+    InboundEmailWebhookPayload,
     InformationRequestCreateRequest,
+    StatusUpdateCreateRequest,
 )
 from app.services.complaint_service import ComplaintService
 
@@ -404,6 +418,34 @@ def resolve_batch_candidates(
     return ComplaintBatchLinkResponse.model_validate(link)
 
 
+@router.get(
+    "/complaints/{complaint_id}/communications",
+    response_model=Page[ComplaintCommunicationResponse],
+)
+def list_communications(
+    complaint_id: uuid.UUID,
+    include_internal: bool = Query(default=True),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    tenant_ctx: TenantContext = Depends(require_permission("complaint.read")),
+    db: Session = Depends(get_db),
+) -> Page[ComplaintCommunicationResponse]:
+    items, total = _svc.list_communications(
+        db,
+        complaint_id=complaint_id,
+        tenant_ctx=tenant_ctx,
+        include_internal=include_internal,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[ComplaintCommunicationResponse.model_validate(c) for c in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
 @router.post(
     "/complaints/{complaint_id}/communications",
     response_model=ComplaintCommunicationResponse,
@@ -438,6 +480,79 @@ def request_information(
     return ComplaintCommunicationResponse.model_validate(comm)
 
 
+@router.post(
+    "/complaints/{complaint_id}/acknowledgements",
+    response_model=ComplaintCommunicationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_acknowledgement(
+    complaint_id: uuid.UUID,
+    payload: AcknowledgementCreateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("complaint.communicate")),
+    db: Session = Depends(get_db),
+) -> ComplaintCommunicationResponse:
+    comm = _svc.send_acknowledgement(
+        db, complaint_id=complaint_id, tenant_ctx=tenant_ctx, payload=payload
+    )
+    return ComplaintCommunicationResponse.model_validate(comm)
+
+
+@router.post(
+    "/complaints/{complaint_id}/status-updates",
+    response_model=ComplaintCommunicationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_status_update(
+    complaint_id: uuid.UUID,
+    payload: StatusUpdateCreateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("complaint.communicate")),
+    db: Session = Depends(get_db),
+) -> ComplaintCommunicationResponse:
+    comm = _svc.send_status_update(
+        db, complaint_id=complaint_id, tenant_ctx=tenant_ctx, payload=payload
+    )
+    return ComplaintCommunicationResponse.model_validate(comm)
+
+
+@router.post(
+    "/complaints/{complaint_id}/closure-messages",
+    response_model=ComplaintCommunicationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_closure_message(
+    complaint_id: uuid.UUID,
+    payload: ClosureMessageCreateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("complaint.communicate")),
+    db: Session = Depends(get_db),
+) -> ComplaintCommunicationResponse:
+    comm = _svc.send_closure_message(
+        db, complaint_id=complaint_id, tenant_ctx=tenant_ctx, payload=payload
+    )
+    return ComplaintCommunicationResponse.model_validate(comm)
+
+
+@router.post(
+    "/complaints/{complaint_id}/communications/{communication_id}/reply",
+    response_model=ComplaintCommunicationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def record_communication_reply(
+    complaint_id: uuid.UUID,
+    communication_id: uuid.UUID,
+    payload: CommunicationReplyRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("complaint.communicate")),
+    db: Session = Depends(get_db),
+) -> ComplaintCommunicationResponse:
+    comm = _svc.record_communication_reply(
+        db,
+        complaint_id=complaint_id,
+        communication_id=communication_id,
+        tenant_ctx=tenant_ctx,
+        payload=payload,
+    )
+    return ComplaintCommunicationResponse.model_validate(comm)
+
+
 @router.post("/complaints/{complaint_id}/close", response_model=ComplaintDetailResponse)
 def close_complaint(
     request: Request,
@@ -455,4 +570,199 @@ def close_complaint(
         source_ip=source_ip,
     )
     return ComplaintDetailResponse.model_validate(complaint)
+
+
+# --- B7 Email Intake Connections, Webhooks, Sync & Triage Queue ---
+
+
+@router.post(
+    "/email-intake/connections",
+    response_model=EmailConnectionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_email_connection(
+    request: Request,
+    payload: EmailConnectionCreateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.admin")),
+    db: Session = Depends(get_db),
+) -> EmailConnectionResponse:
+    source_ip = request.client.host if request.client else None
+    conn, raw_secret = _svc.create_email_connection(
+        db, tenant_ctx=tenant_ctx, payload=payload, source_ip=source_ip
+    )
+    resp = EmailConnectionResponse.model_validate(conn)
+    resp.webhook_secret = raw_secret
+    return resp
+
+
+@router.get("/email-intake/connections", response_model=Page[EmailConnectionResponse])
+def list_email_connections(
+    is_active: Optional[bool] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.admin")),
+    db: Session = Depends(get_db),
+) -> Page[EmailConnectionResponse]:
+    items, total = _svc.list_email_connections(
+        db, tenant_ctx=tenant_ctx, is_active=is_active, page=page, page_size=page_size
+    )
+    return Page(
+        items=[EmailConnectionResponse.model_validate(c) for c in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/email-intake/connections/{connection_id}", response_model=EmailConnectionResponse)
+def get_email_connection(
+    connection_id: uuid.UUID,
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.admin")),
+    db: Session = Depends(get_db),
+) -> EmailConnectionResponse:
+    conn = _svc.get_email_connection(db, tenant_ctx=tenant_ctx, connection_id=connection_id)
+    return EmailConnectionResponse.model_validate(conn)
+
+
+@router.patch("/email-intake/connections/{connection_id}", response_model=EmailConnectionResponse)
+def update_email_connection(
+    request: Request,
+    connection_id: uuid.UUID,
+    payload: EmailConnectionUpdateRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.admin")),
+    db: Session = Depends(get_db),
+) -> EmailConnectionResponse:
+    source_ip = request.client.host if request.client else None
+    conn, rotated_secret = _svc.update_email_connection(
+        db,
+        tenant_ctx=tenant_ctx,
+        connection_id=connection_id,
+        payload=payload,
+        source_ip=source_ip,
+    )
+    resp = EmailConnectionResponse.model_validate(conn)
+    resp.webhook_secret = rotated_secret
+    return resp
+
+
+@router.post(
+    "/email-intake/webhooks/{connection_id}",
+    response_model=InboundEmailWebhookAckResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("email_webhook", max_requests=60, window_seconds=60))],
+)
+def receive_email_webhook(
+    request: Request,
+    response: Response,
+    connection_id: uuid.UUID,
+    payload: InboundEmailWebhookPayload,
+    x_webhook_secret: Optional[str] = Header(default=None, alias="X-Webhook-Secret"),
+    db: Session = Depends(get_db),
+) -> InboundEmailWebhookAckResponse:
+    source_ip = request.client.host if request.client else None
+    ack = _svc.ingest_webhook_email(
+        db,
+        connection_id=connection_id,
+        webhook_secret=x_webhook_secret,
+        payload=payload,
+        source_ip=source_ip,
+    )
+    if ack.deduplicated:
+        response.status_code = status.HTTP_200_OK
+    return ack
+
+
+@router.post(
+    "/email-intake/connections/{connection_id}/sync",
+    response_model=EmailConnectionSyncResponse,
+)
+def sync_email_connection(
+    connection_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=200),
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.admin")),
+    db: Session = Depends(get_db),
+) -> EmailConnectionSyncResponse:
+    return _svc.sync_email_connection(
+        db, tenant_ctx=tenant_ctx, connection_id=connection_id, limit=limit
+    )
+
+
+@router.get("/email-intake/inbound", response_model=Page[InboundEmailSummaryResponse])
+def list_inbound_emails(
+    triage_status: Optional[str] = Query(default=None),
+    email_connection_id: Optional[uuid.UUID] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.triage")),
+    db: Session = Depends(get_db),
+) -> Page[InboundEmailSummaryResponse]:
+    items, total = _svc.list_inbound_emails(
+        db,
+        tenant_ctx=tenant_ctx,
+        triage_status=triage_status,
+        email_connection_id=email_connection_id,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[InboundEmailSummaryResponse.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/email-intake/triage-queue", response_model=Page[InboundEmailSummaryResponse])
+def list_email_triage_queue(
+    email_connection_id: Optional[uuid.UUID] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.triage")),
+    db: Session = Depends(get_db),
+) -> Page[InboundEmailSummaryResponse]:
+    items, total = _svc.list_inbound_emails(
+        db,
+        tenant_ctx=tenant_ctx,
+        triage_status=InboundEmailTriageStatus.MANUAL_TRIAGE_PENDING.value,
+        email_connection_id=email_connection_id,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(
+        items=[InboundEmailSummaryResponse.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/email-intake/inbound/{inbound_email_id}", response_model=InboundEmailDetailResponse)
+def get_inbound_email_detail(
+    inbound_email_id: uuid.UUID,
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.triage")),
+    db: Session = Depends(get_db),
+) -> InboundEmailDetailResponse:
+    inbound = _svc.get_inbound_email_detail(
+        db, tenant_ctx=tenant_ctx, inbound_email_id=inbound_email_id
+    )
+    return InboundEmailDetailResponse.model_validate(inbound)
+
+
+@router.post("/email-intake/inbound/{inbound_email_id}/triage", response_model=InboundEmailDetailResponse)
+def triage_inbound_email(
+    request: Request,
+    inbound_email_id: uuid.UUID,
+    payload: InboundEmailTriageRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("email_intake.triage")),
+    db: Session = Depends(get_db),
+) -> InboundEmailDetailResponse:
+    source_ip = request.client.host if request.client else None
+    inbound = _svc.triage_inbound_email(
+        db,
+        tenant_ctx=tenant_ctx,
+        inbound_email_id=inbound_email_id,
+        payload=payload,
+        source_ip=source_ip,
+    )
+    return InboundEmailDetailResponse.model_validate(inbound)
 

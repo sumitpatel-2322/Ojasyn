@@ -15,7 +15,6 @@ from app.core.logging import CorrelationIdMiddleware, configure_logging, get_cor
 from app.integrations.sse_transport import sse_transport
 from app.models.schemas.common import ErrorEnvelope
 
-
 def create_app(
     *,
     include_legacy_routers: Optional[bool] = None,

@@ -2,8 +2,8 @@ import base64
 import email
 import hashlib
 import hmac
+import html
 import imaplib
-import re
 import secrets
 import smtplib
 import threading
@@ -12,24 +12,133 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import parseaddr, parsedate_to_datetime
-from typing import Any, Dict, List, Optional, Protocol, Sequence
+from html.parser import HTMLParser
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
+from urllib.parse import urlsplit
 
 from app.core.exceptions import ExternalProviderError, ValidationError
 from app.domain.enums import EmailProviderType
 
-_SCRIPT_OR_ACTIVE_TAG_RE = re.compile(
-    r"<\s*(script|iframe|object|embed|style)\b[^>]*>.*?<\s*/\s*\1\s*>",
-    flags=re.IGNORECASE | re.DOTALL,
+_ALLOWED_HTML_TAGS = frozenset(
+    {
+        "p",
+        "br",
+        "div",
+        "span",
+        "strong",
+        "b",
+        "em",
+        "i",
+        "u",
+        "ul",
+        "ol",
+        "li",
+        "blockquote",
+        "pre",
+        "code",
+        "a",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "hr",
+    }
 )
-_SELF_CLOSING_ACTIVE_TAG_RE = re.compile(
-    r"<\s*(script|iframe|object|embed)\b[^>]*/?\s*>",
-    flags=re.IGNORECASE,
+_VOID_HTML_TAGS = frozenset({"br", "hr"})
+_DROP_CONTENT_HTML_TAGS = frozenset(
+    {
+        "script",
+        "style",
+        "iframe",
+        "object",
+        "embed",
+        "svg",
+        "math",
+        "noscript",
+        "template",
+        "textarea",
+        "title",
+    }
 )
-_INLINE_EVENT_HANDLER_RE = re.compile(
-    r"""\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)""",
-    flags=re.IGNORECASE,
-)
-_JS_URI_RE = re.compile(r"javascript\s*:", flags=re.IGNORECASE)
+_ALLOWED_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
+
+
+def _is_safe_link_url(raw_url: str) -> bool:
+    cleaned = "".join(ch for ch in raw_url if ord(ch) >= 32).strip()
+    if not cleaned:
+        return False
+    parsed = urlsplit(cleaned)
+    return parsed.scheme.lower() in _ALLOWED_LINK_SCHEMES
+
+
+class _AllowlistHTMLSanitizer(HTMLParser):
+    """Strict HTML allowlist sanitizer dropping active tags, event handlers, and unsafe URI schemes."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._chunks: List[str] = []
+        self._drop_stack: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        tag_lower = tag.lower()
+        if tag_lower in _DROP_CONTENT_HTML_TAGS:
+            self._drop_stack.append(tag_lower)
+            return
+        if self._drop_stack or tag_lower not in _ALLOWED_HTML_TAGS:
+            return
+
+        rendered_attrs: List[str] = []
+        if tag_lower == "a":
+            has_safe_href = False
+            for attr_name, attr_val in attrs:
+                name_lower = attr_name.lower()
+                if name_lower == "href" and attr_val and _is_safe_link_url(attr_val):
+                    rendered_attrs.append(f'href="{html.escape(attr_val.strip(), quote=True)}"')
+                    has_safe_href = True
+                elif name_lower == "title" and attr_val is not None:
+                    rendered_attrs.append(f'title="{html.escape(attr_val, quote=True)}"')
+            if has_safe_href:
+                rendered_attrs.append('rel="noopener noreferrer"')
+
+        attr_str = f" {' '.join(rendered_attrs)}" if rendered_attrs else ""
+        self._chunks.append(f"<{tag_lower}{attr_str}>")
+
+    def handle_startendtag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        tag_lower = tag.lower()
+        if tag_lower in _DROP_CONTENT_HTML_TAGS or self._drop_stack:
+            return
+        if tag_lower in _VOID_HTML_TAGS:
+            self._chunks.append(f"<{tag_lower}>")
+        elif tag_lower in _ALLOWED_HTML_TAGS:
+            self.handle_starttag(tag_lower, attrs)
+            self._chunks.append(f"</{tag_lower}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_lower = tag.lower()
+        if self._drop_stack:
+            if tag_lower in self._drop_stack:
+                while self._drop_stack:
+                    popped = self._drop_stack.pop()
+                    if popped == tag_lower:
+                        break
+            return
+        if tag_lower in _ALLOWED_HTML_TAGS and tag_lower not in _VOID_HTML_TAGS:
+            self._chunks.append(f"</{tag_lower}>")
+
+    def handle_data(self, data: str) -> None:
+        if not self._drop_stack and data:
+            self._chunks.append(html.escape(data, quote=False))
+
+    def get_html(self) -> str:
+        return "".join(self._chunks).strip()
 
 
 def generate_webhook_secret() -> str:
@@ -51,14 +160,13 @@ def verify_webhook_secret(provided_secret: Optional[str], stored_hash: Optional[
 
 
 def sanitize_email_html(raw_html: Optional[str]) -> Optional[str]:
-    """Strips dangerous active tags, inline event handlers, and javascript: URIs from HTML bodies."""
+    """Allowlist-sanitizes HTML bodies, dropping active tags, event handlers, and unsafe URI schemes."""
     if raw_html is None:
         return None
-    cleaned = _SCRIPT_OR_ACTIVE_TAG_RE.sub("", raw_html)
-    cleaned = _SELF_CLOSING_ACTIVE_TAG_RE.sub("", cleaned)
-    cleaned = _INLINE_EVENT_HANDLER_RE.sub("", cleaned)
-    cleaned = _JS_URI_RE.sub("blocked:", cleaned)
-    return cleaned.strip()
+    parser = _AllowlistHTMLSanitizer()
+    parser.feed(raw_html)
+    parser.close()
+    return parser.get_html()
 
 
 @dataclass(frozen=True)

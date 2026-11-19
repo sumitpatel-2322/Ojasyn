@@ -102,6 +102,7 @@ from app.models.schemas.complaints import (
     ComplaintCommunicationResponse,
     ComplaintDetailResponse,
     ComplaintEventResponse,
+    ComplaintPublicCommunicationResponse,
     ComplaintPublicStatusResponse,
     ComplaintRegisterRequest,
     ComplaintRegisterResponse,
@@ -745,7 +746,7 @@ class ComplaintService:
             closed_at=complaint.closed_at,
             created_at=complaint.created_at,
             events=[ComplaintEventResponse.model_validate(e) for e in events],
-            communications=[ComplaintCommunicationResponse.model_validate(c) for c in comms],
+            communications=[ComplaintPublicCommunicationResponse.model_validate(c) for c in comms],
             attachments=[ComplaintAttachmentResponse.model_validate(a) for a in atts],
         )
 
@@ -1754,7 +1755,10 @@ class ComplaintService:
 
             prev_status = complaint.status
             if payload.transition_to_waiting_info:
-                complaint.status = ComplaintStatus.WAITING_INFO.value
+                if complaint.status != ComplaintStatus.WAITING_INFO.value:
+                    complaint.status = ComplaintStatus.WAITING_INFO.value
+                    if payload.row_version is None:
+                        complaint.row_version += 1
                 complaint.updated_by_user_id = tenant_ctx.user_id
                 for clock in self._repo.get_active_sla_clocks(db, complaint.id):
                     if clock.status in {SLAStatus.ON_TRACK.value, SLAStatus.AT_RISK.value}:
@@ -1838,6 +1842,8 @@ class ComplaintService:
             if complaint.acknowledged_at is None:
                 complaint.acknowledged_at = now
                 complaint.updated_by_user_id = tenant_ctx.user_id
+                if payload.row_version is None:
+                    complaint.row_version += 1
 
             for clock in self._repo.get_active_sla_clocks(db, complaint.id):
                 if clock.sla_stage == "ACKNOWLEDGEMENT" and clock.status != SLAStatus.MET.value:
@@ -2060,6 +2066,11 @@ class ComplaintService:
         )
         if parent_comm is None:
             raise NotFoundError("Target communication not found for this complaint.")
+        if parent_comm.is_internal_only:
+            raise ConflictError(
+                "Cannot record a reporter reply to an internal-only note.",
+                error_code="CANNOT_REPLY_TO_INTERNAL_NOTE",
+            )
 
         now = datetime.now(timezone.utc)
         with UnitOfWork(db):
@@ -2095,6 +2106,8 @@ class ComplaintService:
             if complaint.status == ComplaintStatus.WAITING_INFO.value:
                 complaint.status = ComplaintStatus.TRIAGED.value
                 complaint.updated_by_user_id = tenant_ctx.user_id
+                if payload.row_version is None:
+                    complaint.row_version += 1
                 unpaused_clocks = self._unpause_sla_clocks_in_tx(db, complaint.id, now=now)
 
             db.add(
@@ -3149,37 +3162,54 @@ class ComplaintService:
                 complaint_id=existing.complaint_id,
             )
 
+        conn_org_id = conn.organization_id
+        # Close any autobegun read transaction BEFORE storage/object I/O
+        db.rollback()
+
         settings = get_settings()
         fetched = parse_dict_inbound_message(
             payload.model_dump(mode="python"),
             max_attachment_bytes=settings.UPLOAD_MAX_BYTES,
         )
         storage_provider = storage or self._get_storage()
-        # Preserve attachments to ObjectStorageProvider BEFORE opening DB UnitOfWork
+        # Preserve attachments to ObjectStorageProvider strictly outside open DB transactions
         pre_stored = self._pre_store_email_attachments(
-            organization_id=conn.organization_id,
+            organization_id=conn_org_id,
             attachments=fetched.attachments,
             storage=storage_provider,
         )
 
+        dedup_existing: Optional[InboundEmail] = None
         try:
             with UnitOfWork(db):
-                inbound = self._persist_inbound_email_in_tx(
-                    db,
-                    conn=conn,
-                    fetched=fetched,
-                    pre_stored_attachments=pre_stored,
-                    storage=storage_provider,
-                    actor_type=ActorType.WEBHOOK.value,
-                    actor_user_id=None,
-                    source_ip=source_ip,
+                conn = self._repo.get_email_connection_by_id(db, connection_id)
+                if conn is None or not conn.is_active:
+                    raise PermissionDeniedError(
+                        "Email connection or organization is not active.",
+                        error_code="EMAIL_CONNECTION_INACTIVE",
+                    )
+                existing = self._repo.get_inbound_email_by_provider_msg_id(
+                    db, conn.organization_id, fetched.provider_message_id
                 )
+                if existing is not None:
+                    dedup_existing = existing
+                else:
+                    inbound = self._persist_inbound_email_in_tx(
+                        db,
+                        conn=conn,
+                        fetched=fetched,
+                        pre_stored_attachments=pre_stored,
+                        storage=storage_provider,
+                        actor_type=ActorType.WEBHOOK.value,
+                        actor_user_id=None,
+                        source_ip=source_ip,
+                    )
         except IntegrityError:
             for _, _, object_key, *_ in pre_stored:
                 storage_provider.delete_object(object_key)
             db.rollback()
             existing = self._repo.get_inbound_email_by_provider_msg_id(
-                db, conn.organization_id, fetched.provider_message_id
+                db, conn_org_id, fetched.provider_message_id
             )
             if existing is not None:
                 return InboundEmailWebhookAckResponse(
@@ -3194,6 +3224,17 @@ class ComplaintService:
             for _, _, object_key, *_ in pre_stored:
                 storage_provider.delete_object(object_key)
             raise
+
+        if dedup_existing is not None:
+            for _, _, object_key, *_ in pre_stored:
+                storage_provider.delete_object(object_key)
+            return InboundEmailWebhookAckResponse(
+                id=dedup_existing.id,
+                provider_message_id=dedup_existing.provider_message_id,
+                triage_status=dedup_existing.triage_status,
+                deduplicated=True,
+                complaint_id=dedup_existing.complaint_id,
+            )
 
         db.refresh(inbound)
         return InboundEmailWebhookAckResponse(
@@ -3233,31 +3274,41 @@ class ComplaintService:
             limit=limit,
         )
 
+        candidate_ids = list({m.provider_message_id for m in batch.messages if m.provider_message_id})
+        existing_ids: set[str] = set()
+        if candidate_ids:
+            existing_ids = set(
+                db.scalars(
+                    select(InboundEmail.provider_message_id).where(
+                        InboundEmail.organization_id == org_id,
+                        InboundEmail.provider_message_id.in_(candidate_ids),
+                    )
+                ).all()
+            )
+        # Release read transaction strictly BEFORE storage/object I/O
+        db.rollback()
+
         storage_provider = storage or self._get_storage()
         pre_stored_by_msg_id: Dict[str, List[Tuple[uuid.UUID, uuid.UUID, str, str, str, str, bytes]]] = {}
         new_messages: List[FetchedInboundEmail] = []
+        seen_in_batch: set[str] = set()
         deduplicated_count = 0
-
-        for msg in batch.messages:
-            existing = self._repo.get_inbound_email_by_provider_msg_id(
-                db, org_id, msg.provider_message_id
-            )
-            if existing is not None:
-                deduplicated_count += 1
-                continue
-            if msg.provider_message_id in pre_stored_by_msg_id:
-                deduplicated_count += 1
-                continue
-            pre_stored_by_msg_id[msg.provider_message_id] = self._pre_store_email_attachments(
-                organization_id=org_id,
-                attachments=msg.attachments,
-                storage=storage_provider,
-            )
-            new_messages.append(msg)
 
         now = datetime.now(timezone.utc)
         created_count = 0
         try:
+            for msg in batch.messages:
+                if msg.provider_message_id in existing_ids or msg.provider_message_id in seen_in_batch:
+                    deduplicated_count += 1
+                    continue
+                seen_in_batch.add(msg.provider_message_id)
+                pre_stored_by_msg_id[msg.provider_message_id] = self._pre_store_email_attachments(
+                    organization_id=org_id,
+                    attachments=msg.attachments,
+                    storage=storage_provider,
+                )
+                new_messages.append(msg)
+
             with UnitOfWork(db):
                 conn = self._get_connection_for_tenant(db, tenant_ctx, connection_id)
                 for msg in new_messages:
@@ -3265,6 +3316,8 @@ class ComplaintService:
                         db, org_id, msg.provider_message_id
                     ) is not None:
                         deduplicated_count += 1
+                        for _, _, object_key, *_ in pre_stored_by_msg_id.pop(msg.provider_message_id, []):
+                            storage_provider.delete_object(object_key)
                         continue
                     self._persist_inbound_email_in_tx(
                         db,
@@ -3388,6 +3441,14 @@ class ComplaintService:
         source_ip: Optional[str] = None,
     ) -> InboundEmail:
         inbound = self._get_inbound_for_tenant(db, tenant_ctx, inbound_email_id)
+        if inbound.complaint_id is not None or inbound.triage_status in {
+            InboundEmailTriageStatus.COMPLAINT_CREATED.value,
+            InboundEmailTriageStatus.TRIAGED_COMPLAINT.value,
+        }:
+            raise ConflictError(
+                "Inbound email has already been converted or linked to a complaint.",
+                error_code="INBOUND_EMAIL_ALREADY_LINKED",
+            )
         conn = self._repo.get_email_connection_for_org(
             db, tenant_ctx.organization_id, inbound.email_connection_id
         )
@@ -3399,8 +3460,6 @@ class ComplaintService:
         email_atts = self._repo.list_email_attachments(db, tenant_ctx.organization_id, inbound.id)
 
         if payload.decision == "CREATE_COMPLAINT":
-            if inbound.complaint_id is not None:
-                raise ConflictError("Inbound email is already linked to a complaint.")
             target_site_id = payload.site_id if payload.site_id is not None else (conn.default_site_id if conn else None)
             if target_site_id is not None:
                 site = db.scalar(
@@ -3571,6 +3630,7 @@ class ComplaintService:
                 unpaused = 0
                 if complaint.status == ComplaintStatus.WAITING_INFO.value:
                     complaint.status = ComplaintStatus.TRIAGED.value
+                    complaint.row_version += 1
                     complaint.updated_by_user_id = tenant_ctx.user_id
                     unpaused = self._unpause_sla_clocks_in_tx(db, complaint.id, now=now)
 

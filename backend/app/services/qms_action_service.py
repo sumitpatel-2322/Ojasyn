@@ -1030,9 +1030,15 @@ class QMSActionService:
                 target_resource=f"/api/v1/capas/{capa_id}",
             )
 
+        new_owner_mem: Optional[OrganizationMembership] = None
         if payload.owner_membership_id is not None:
-            self._validate_active_membership(db, tenant_ctx.organization_id, payload.owner_membership_id)
-            if capa.approver_membership_id is not None and payload.owner_membership_id == capa.approver_membership_id:
+            new_owner_mem = self._validate_active_membership(
+                db, tenant_ctx.organization_id, payload.owner_membership_id
+            )
+            if (
+                (capa.approver_membership_id is not None and payload.owner_membership_id == capa.approver_membership_id)
+                or (capa.approved_by_user_id is not None and new_owner_mem.user_id == capa.approved_by_user_id)
+            ):
                 self._record_maker_checker_violation(
                     tenant_ctx=tenant_ctx,
                     source_ip=source_ip,
@@ -1040,9 +1046,15 @@ class QMSActionService:
                     details={
                         "capa_id": str(capa.id),
                         "owner_membership_id": str(payload.owner_membership_id),
-                        "approver_membership_id": str(capa.approver_membership_id),
+                        "owner_user_id": str(new_owner_mem.user_id),
+                        "approver_membership_id": str(capa.approver_membership_id)
+                        if capa.approver_membership_id
+                        else None,
+                        "approved_by_user_id": str(capa.approved_by_user_id)
+                        if capa.approved_by_user_id
+                        else None,
                     },
-                    message="Maker-checker violation: CAPA owner cannot be the same as the CAPA approver.",
+                    message="Maker-checker violation: CAPA owner cannot be the same user or membership as the CAPA approver.",
                 )
 
         with UnitOfWork(db):
@@ -1051,6 +1063,33 @@ class QMSActionService:
             )
             if locked is None:
                 raise NotFoundError("CAPA not found.")
+            if locked.status in {CAPAStatus.EFFECTIVENESS_REVIEW.value, CAPAStatus.CLOSED.value}:
+                raise ConflictError(
+                    f"CAPA in '{locked.status}' status cannot be edited directly.",
+                    error_code="CAPA_IMMUTABLE_IN_STATUS",
+                )
+            if new_owner_mem is not None and (
+                (locked.approver_membership_id is not None and payload.owner_membership_id == locked.approver_membership_id)
+                or (locked.approved_by_user_id is not None and new_owner_mem.user_id == locked.approved_by_user_id)
+            ):
+                db.rollback()
+                self._record_maker_checker_violation(
+                    tenant_ctx=tenant_ctx,
+                    source_ip=source_ip,
+                    target_resource=f"/api/v1/capas/{capa_id}",
+                    details={
+                        "capa_id": str(locked.id),
+                        "owner_membership_id": str(payload.owner_membership_id),
+                        "owner_user_id": str(new_owner_mem.user_id),
+                        "approver_membership_id": str(locked.approver_membership_id)
+                        if locked.approver_membership_id
+                        else None,
+                        "approved_by_user_id": str(locked.approved_by_user_id)
+                        if locked.approved_by_user_id
+                        else None,
+                    },
+                    message="Maker-checker violation: CAPA owner cannot be the same user or membership as the CAPA approver.",
+                )
             verify_and_increment_version(locked, payload.row_version)
             prev_state = {"severity": locked.severity, "owner_membership_id": str(locked.owner_membership_id)}
 
@@ -1210,6 +1249,11 @@ class QMSActionService:
             )
             if locked_capa is None:
                 raise NotFoundError("CAPA not found.")
+            if locked_capa.status in {CAPAStatus.EFFECTIVENESS_REVIEW.value, CAPAStatus.CLOSED.value}:
+                raise ConflictError(
+                    f"Cannot add actions while CAPA is in '{locked_capa.status}' status.",
+                    error_code="CAPA_IMMUTABLE_IN_STATUS",
+                )
             action_seq = self._repo.next_capa_action_seq(db, tenant_ctx.organization_id, locked_capa.id)
             action = CAPAAction(
                 organization_id=tenant_ctx.organization_id,
@@ -1342,6 +1386,11 @@ class QMSActionService:
             if payload.implementation_notes is not None:
                 locked_action.implementation_notes = payload.implementation_notes.strip()
             if resolved_doc_id is not None:
+                if (
+                    payload.evidence_document_version_id is None
+                    and resolved_doc_id != locked_action.evidence_document_id
+                ):
+                    locked_action.evidence_document_version_id = None
                 locked_action.evidence_document_id = resolved_doc_id
             if resolved_ver_id is not None:
                 locked_action.evidence_document_version_id = resolved_ver_id
@@ -1456,6 +1505,11 @@ class QMSActionService:
             locked_action.completed_by_user_id = tenant_ctx.user_id
             locked_action.implementation_notes = payload.implementation_notes.strip()
             if resolved_doc_id is not None:
+                if (
+                    payload.evidence_document_version_id is None
+                    and resolved_doc_id != locked_action.evidence_document_id
+                ):
+                    locked_action.evidence_document_version_id = None
                 locked_action.evidence_document_id = resolved_doc_id
             if resolved_ver_id is not None:
                 locked_action.evidence_document_version_id = resolved_ver_id
@@ -1618,6 +1672,11 @@ class QMSActionService:
             )
             if locked_capa is None:
                 raise NotFoundError("CAPA not found.")
+            if locked_capa.status == CAPAStatus.CLOSED.value:
+                raise ConflictError(
+                    "Cannot add effectiveness checks to a CLOSED CAPA.",
+                    error_code="CAPA_IMMUTABLE_IN_STATUS",
+                )
             check_seq = self._repo.next_effectiveness_check_seq(
                 db, tenant_ctx.organization_id, locked_capa.id
             )
@@ -1865,11 +1924,12 @@ class QMSActionService:
         checks = self._repo.list_effectiveness_checks(db, tenant_ctx.organization_id, capa.id)
         if (
             not checks
+            or any(c.status == EffectivenessCheckStatus.PENDING.value for c in checks)
             or not any(c.status == EffectivenessCheckStatus.EFFECTIVE.value for c in checks)
             or checks[-1].status != EffectivenessCheckStatus.EFFECTIVE.value
         ):
             raise ConflictError(
-                "Cannot close CAPA without a completed EFFECTIVE latest effectiveness check.",
+                "Cannot close CAPA without a completed EFFECTIVE latest effectiveness check and zero PENDING checks.",
                 error_code="EFFECTIVENESS_NOT_VERIFIED",
             )
 
@@ -1880,6 +1940,9 @@ class QMSActionService:
             )
             if locked is None:
                 raise NotFoundError("CAPA not found.")
+            assert_transition(
+                CAPA_TRANSITIONS, locked.status, CAPAStatus.CLOSED.value, entity_name="CAPA"
+            )
             verify_and_increment_version(locked, payload.row_version)
             prev_status = locked.status
 

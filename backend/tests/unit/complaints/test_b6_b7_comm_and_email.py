@@ -68,15 +68,31 @@ def test_sanitize_email_html_strips_active_scripts_and_handlers() -> None:
     raw = (
         '<div onclick="alert(1)">Hello<script>evil()</script>'
         '<iframe src="https://evil.test"></iframe>'
-        '<a href="javascript:steal()">Click</a></div>'
+        '<img/onerror=alert(1) src=x>'
+        '<sc<iframe/>ript>alert(1)</script>'
+        '<a href="javascript:steal()">JS</a>'
+        '<a href="vbscript:msgbox(1)">VBS</a>'
+        '<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Data</a>'
+        '<a href="https://example.com/ok">SafeLink</a>'
+        '<style>body{display:none}'
+        '</div>'
     )
     sanitized = sanitize_email_html(raw)
     assert sanitized is not None
-    assert "<script" not in sanitized.lower()
-    assert "<iframe" not in sanitized.lower()
-    assert "onclick" not in sanitized.lower()
-    assert "javascript:" not in sanitized.lower()
+    lower = sanitized.lower()
+    assert "<script" not in lower
+    assert "<iframe" not in lower
+    assert "<img" not in lower
+    assert "<style" not in lower
+    assert "onerror" not in lower
+    assert "onclick" not in lower
+    assert "javascript:" not in lower
+    assert "vbscript:" not in lower
+    assert "data:text/html" not in lower
+    assert "body{display:none}" not in lower
     assert "Hello" in sanitized
+    assert 'href="https://example.com/ok"' in sanitized
+    assert 'rel="noopener noreferrer"' in sanitized
 
 
 def test_email_provider_adapters_and_error_guards() -> None:

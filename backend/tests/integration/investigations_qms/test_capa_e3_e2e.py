@@ -187,12 +187,24 @@ def test_capa_e3_full_lifecycle_ineffective_rework_evidence_and_closure_guard(
         ev_ver = db.scalar(select(DocumentVersion).where(DocumentVersion.document_id == ev_doc.id))
         assert ev_ver is not None
 
+        ev_doc2 = doc_svc.upload_in_tx(
+            db,
+            organization_id=org.id,
+            uploaded_by_user_id=officer.id,
+            file_bytes=b"%PDF-1.4\n%evidence2\n",
+            original_filename="recalibration_cert.pdf",
+            claimed_mime_type="application/pdf",
+            category="OTHER",
+            site_id=site.id,
+        )
+
         org_id = org.id
         site_id = site.id
         complaint_id = complaint.id
         inv_id = inv.id
         dev_id = dev.id
         ev_doc_id = ev_doc.id
+        ev_doc2_id = ev_doc2.id
         ev_ver_id = ev_ver.id
         officer_mem_id = officer_mem.id
 
@@ -293,6 +305,20 @@ def test_capa_e3_full_lifecycle_ineffective_rework_evidence_and_closure_guard(
     assert comp1.status_code == 200
     assert comp1.json()["status"] == "COMPLETED"
     assert comp1.json()["evidence_document_id"] == str(ev_doc_id)
+    assert comp1.json()["evidence_document_version_id"] == str(ev_ver_id)
+
+    # Regression: updating evidence_document_id to a different document without evidence_document_version_id clears stale version_id
+    upd_doc1 = api_client.patch(
+        f"/api/v1/capas/{capa_id}/actions/{act1['id']}",
+        headers=officer_hdrs,
+        json={
+            "row_version": comp1.json()["row_version"],
+            "evidence_document_id": str(ev_doc2_id),
+        },
+    )
+    assert upd_doc1.status_code == 200
+    assert upd_doc1.json()["evidence_document_id"] == str(ev_doc2_id)
+    assert upd_doc1.json()["evidence_document_version_id"] is None
 
     early_sub = api_client.post(
         f"/api/v1/capas/{capa_id}/submit-effectiveness",
@@ -418,6 +444,34 @@ def test_capa_e3_full_lifecycle_ineffective_rework_evidence_and_closure_guard(
     assert rec2.status_code == 200
     assert rec2.json()["status"] == "EFFECTIVE"
 
+    # Regression: dangling PENDING check alongside EFFECTIVE check must block close_capa
+    chk3_pending = api_client.post(
+        f"/api/v1/capas/{capa_id}/effectiveness-checks",
+        headers=officer_hdrs,
+        json={
+            "criteria_description": "Follow-up 30-day stability audit",
+            "planned_check_date": date.today().isoformat(),
+        },
+    ).json()
+    close_blk_pending = api_client.post(
+        f"/api/v1/capas/{capa_id}/close",
+        headers=qms_head_hdrs,
+        json={"row_version": capa_rv, "closure_reason": "Trying to close with pending check"},
+    )
+    assert close_blk_pending.status_code == 409
+    assert close_blk_pending.json()["error_code"] == "EFFECTIVENESS_NOT_VERIFIED"
+
+    rec3 = api_client.post(
+        f"/api/v1/capas/{capa_id}/effectiveness-checks/{chk3_pending['id']}/record",
+        headers=qa_head_hdrs,
+        json={
+            "row_version": 1,
+            "status": "EFFECTIVE",
+            "findings_summary": "30-day follow-up audit confirmed sustained compliance.",
+        },
+    )
+    assert rec3.status_code == 200
+
     close_ok = api_client.post(
         f"/api/v1/capas/{capa_id}/close",
         headers=qms_head_hdrs,
@@ -438,10 +492,17 @@ def test_capa_e3_full_lifecycle_ineffective_rework_evidence_and_closure_guard(
         approvals = uow.session.scalars(
             select(ApprovalRecord).where(
                 ApprovalRecord.organization_id == org_id,
-                ApprovalRecord.entity_id.in_([uuid.UUID(capa_id), uuid.UUID(chk1["id"]), uuid.UUID(chk2["id"])]),
+                ApprovalRecord.entity_id.in_(
+                    [
+                        uuid.UUID(capa_id),
+                        uuid.UUID(chk1["id"]),
+                        uuid.UUID(chk2["id"]),
+                        uuid.UUID(chk3_pending["id"]),
+                    ]
+                ),
             )
         ).all()
-        assert len(approvals) == 4  # open + check1 + check2 + close
+        assert len(approvals) == 5  # open + check1 + check2 + check3 + close
 
 
 def test_capa_overdue_detection_and_worker_notification_idempotent(api_client, sqlite_db) -> None:

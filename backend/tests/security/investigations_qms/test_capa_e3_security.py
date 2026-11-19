@@ -395,6 +395,53 @@ def test_capa_e3_cross_tenant_site_scope_rbac_and_maker_checker(api_client, sqli
     assert mc_close_owner.status_code == 403
     assert mc_close_owner.json()["error_code"] == "MAKER_CHECKER_VIOLATION"
 
+    # 7. Regression: PATCH /capas/{id} cannot reassign owner_membership_id to approver_membership_id OR to approved_by_user_id
+    capa_reassign = api_client.post(
+        "/api/v1/capas",
+        headers=officer_a1_hdrs,
+        json={
+            "site_id": str(site_a1_id),
+            "title": "Reassign owner maker-checker test",
+            "owner_membership_id": str(officer_a1["membership"].id),
+        },
+    ).json()
+    opened_reassign = api_client.post(
+        f"/api/v1/capas/{capa_reassign['id']}/open",
+        headers=qa_head_a_hdrs,
+        json={"row_version": 1},
+    ).json()
+
+    # Attempt 1: reassign owner_membership_id == approver_membership_id -> 403 MAKER_CHECKER_VIOLATION
+    mc_reassign_mem = api_client.patch(
+        f"/api/v1/capas/{capa_reassign['id']}",
+        headers=officer_a1_hdrs,
+        json={
+            "row_version": opened_reassign["row_version"],
+            "owner_membership_id": str(qa_head_a["membership"].id),
+        },
+    )
+    assert mc_reassign_mem.status_code == 403
+    assert mc_reassign_mem.json()["error_code"] == "MAKER_CHECKER_VIOLATION"
+
+    # Attempt 2: even if approver_membership_id differs from new owner_membership_id, same approved_by_user_id -> 403 MAKER_CHECKER_VIOLATION
+    with UnitOfWork(session_factory) as uow:
+        assert uow.session is not None
+        capa_row = uow.session.get(CAPA, uuid.UUID(capa_reassign["id"]))
+        assert capa_row is not None
+        capa_row.approver_membership_id = org_a["membership"].id
+        capa_row.approved_by_user_id = qa_head_a["user"].id
+
+    mc_reassign_user = api_client.patch(
+        f"/api/v1/capas/{capa_reassign['id']}",
+        headers=officer_a1_hdrs,
+        json={
+            "row_version": opened_reassign["row_version"],
+            "owner_membership_id": str(qa_head_a["membership"].id),
+        },
+    )
+    assert mc_reassign_user.status_code == 403
+    assert mc_reassign_user.json()["error_code"] == "MAKER_CHECKER_VIOLATION"
+
     # SecurityEvents persisted for maker-checker & site-scope violations
     with UnitOfWork(session_factory) as uow:
         assert uow.session is not None
@@ -404,4 +451,4 @@ def test_capa_e3_cross_tenant_site_scope_rbac_and_maker_checker(api_client, sqli
                 SecurityEvent.event_type == "MAKER_CHECKER_VIOLATION",
             )
         ).all()
-        assert len(mc_events) >= 4
+        assert len(mc_events) >= 6

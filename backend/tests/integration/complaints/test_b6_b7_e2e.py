@@ -253,6 +253,18 @@ def test_b6_complaint_communication_and_waiting_info_loop_e2e(
     assert closure_msg.status_code == 201
     assert closure_msg.json()["communication_type"] == CommunicationType.CLOSURE_NOTIFICATION.value
 
+    # 8. Regression checks: reply to internal-only note blocked (409), row_version increments without payload.row_version
+    reply_to_internal = api_client.post(
+        f"/api/v1/complaints/{complaint_id}/communications/{internal_note.json()['id']}/reply",
+        headers=headers,
+        json={"channel": "PORTAL", "body_text": "Attempt reply to internal note"},
+    )
+    assert reply_to_internal.status_code == 409
+
+    # Verify ack + info-request + reply each bumped complaint.row_version even when payload.row_version was omitted
+    final_detail = api_client.get(f"/api/v1/complaints/{complaint_id}", headers=headers).json()
+    assert final_detail["row_version"] >= 5
+
 
 def test_b7_email_intake_webhook_dedupe_sync_worker_and_triage_e2e(
     api_client, sqlite_db, tmp_path, monkeypatch
@@ -548,6 +560,25 @@ def test_b7_email_intake_webhook_dedupe_sync_worker_and_triage_e2e(
     assert created_comp["source_channel"] == ComplaintSource.EMAIL.value
     assert len(created_comp["attachments"]) == 1
 
+    # 7. Regression: already-converted/triaged email cannot be overwritten via MARK_NON_COMPLAINT or LINK_EXISTING_COMPLAINT (409)
+    overwrite_non = api_client.post(
+        f"/api/v1/email-intake/inbound/{manual_id}/triage",
+        headers=qa_headers,
+        json={"row_version": 2, "decision": "MARK_NON_COMPLAINT"},
+    )
+    assert overwrite_non.status_code == 409
+
+    overwrite_link = api_client.post(
+        f"/api/v1/email-intake/inbound/{inbound_likely_id}/triage",
+        headers=qa_headers,
+        json={
+            "row_version": detail1_after["row_version"],
+            "decision": "LINK_EXISTING_COMPLAINT",
+            "complaint_id": created_comp_id,
+        },
+    )
+    assert overwrite_link.status_code == 409
+
 
 def test_close_complaint_guarded_by_open_mandatory_capas_hook(sqlite_db, monkeypatch) -> None:
     session_factory = sqlite_db["session_factory"]
@@ -606,5 +637,163 @@ def test_close_complaint_guarded_by_open_mandatory_capas_hook(sqlite_db, monkeyp
             )
         assert exc_info.value.error_code == "OPEN_MANDATORY_CAPAS_EXIST"
         assert exc_info.value.details["open_capa_numbers"] == ["CG-CAPA-2026-000001"]
+    finally:
+        db.close()
+
+
+def test_b7_storage_io_strictly_outside_db_tx_and_no_orphan_blobs_on_batch_failure(
+    sqlite_db, tmp_path
+) -> None:
+    from app.core.deps import TenantContext
+    from app.integrations.email_provider import FetchedEmailAttachment, FetchedInboundEmail
+    from app.integrations.storage_provider import LocalPrivateVaultAdapter
+    from app.models.schemas.complaints import InboundEmailAttachmentInput, InboundEmailWebhookPayload
+
+    session_factory = sqlite_db["session_factory"]
+    with UnitOfWork(session_factory) as uow:
+        assert uow.session is not None
+        actor = create_seeded_tenant_actor(
+            uow.session,
+            org_name="No Orphan Blob Pharma",
+            site_code="NOB-01",
+            email="admin@noorphan.in",
+            role_code="ORG_ADMIN",
+            scope_type="ORGANIZATION",
+        )
+        org_id = actor["organization"].id
+        user_id = actor["user"].id
+        membership_id = actor["membership"].id
+        conn = EmailConnection(
+            organization_id=org_id,
+            name="Clean Tx Mailbox",
+            provider_type="MOCK",
+            mailbox_address="clean@noorphan.in",
+            inbound_secret_hash="4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",  # sha256("3")
+            is_active=True,
+        )
+        uow.session.add(conn)
+        uow.session.flush()
+        conn_id = conn.id
+
+    vault_dir = tmp_path / "strict_vault"
+    inner_storage = LocalPrivateVaultAdapter(root_dir=vault_dir)
+
+    class _TxCheckingStorage:
+        def __init__(self, db_session) -> None:
+            self._db = db_session
+            self.put_tx_states = []
+
+        def put_object(self, object_key: str, data: bytes, *, content_type: str) -> str:
+            self.put_tx_states.append(self._db.in_transaction())
+            return inner_storage.put_object(object_key, data, content_type=content_type)
+
+        def get_object(self, object_key: str) -> bytes:
+            return inner_storage.get_object(object_key)
+
+        def delete_object(self, object_key: str) -> None:
+            inner_storage.delete_object(object_key)
+
+        def exists(self, object_key: str) -> bool:
+            return inner_storage.exists(object_key)
+
+    # 1. Webhook pre-storage executes outside any open DB transaction
+    db = session_factory()
+    try:
+        storage_spy = _TxCheckingStorage(db)
+        ack = ComplaintService().ingest_webhook_email(
+            db,
+            connection_id=conn_id,
+            webhook_secret="3",
+            payload=InboundEmailWebhookPayload(
+                provider_message_id="tx-check-wh-1",
+                from_email="user@example.com",
+                body_text="Broken seal",
+                attachments=[
+                    InboundEmailAttachmentInput(
+                        original_filename="photo.png",
+                        mime_type="image/png",
+                        content_base64=base64.b64encode(_PNG_1X1).decode("ascii"),
+                    )
+                ],
+            ),
+            storage=storage_spy,  # type: ignore[arg-type]
+        )
+        assert ack.deduplicated is False
+        assert storage_spy.put_tx_states == [False]
+    finally:
+        db.close()
+
+    # 2. Sync pre-storage executes outside DB tx AND cleans up msg #1 blobs if msg #2 fails
+    tenant_ctx = TenantContext(
+        user_id=user_id,
+        organization_id=org_id,
+        membership_id=membership_id,
+        allowed_site_ids=frozenset(),
+        is_org_wide=True,
+        permission_codes=frozenset({"email_intake.admin"}),
+    )
+    failing_batch_adapter = MockEmailAdapter(
+        inbound_queue=[
+            FetchedInboundEmail(
+                provider_message_id="sync-batch-good-1",
+                from_email="ok@example.com",
+                body_text="First valid message",
+                attachments=[
+                    FetchedEmailAttachment(
+                        original_filename="ok.png",
+                        mime_type="image/png",
+                        content_bytes=_PNG_1X1,
+                    )
+                ],
+            ),
+            FetchedInboundEmail(
+                provider_message_id="sync-batch-bad-2",
+                from_email="bad@example.com",
+                body_text="Second invalid attachment",
+                attachments=[
+                    FetchedEmailAttachment(
+                        original_filename="bad.exe",
+                        mime_type="application/octet-stream",
+                        content_bytes=b"MZ\x90\x00bad-exe",
+                    )
+                ],
+            ),
+        ]
+    )
+    vault_fail_dir = tmp_path / "fail_vault"
+    fail_storage = LocalPrivateVaultAdapter(root_dir=vault_fail_dir)
+
+    class _SyncTxSpy:
+        def __init__(self, db_session) -> None:
+            self._db = db_session
+            self.put_tx_states = []
+
+        def put_object(self, object_key: str, data: bytes, *, content_type: str) -> str:
+            self.put_tx_states.append(self._db.in_transaction())
+            return fail_storage.put_object(object_key, data, content_type=content_type)
+
+        def get_object(self, object_key: str) -> bytes:
+            return fail_storage.get_object(object_key)
+
+        def delete_object(self, object_key: str) -> None:
+            fail_storage.delete_object(object_key)
+
+        def exists(self, object_key: str) -> bool:
+            return fail_storage.exists(object_key)
+
+    db = session_factory()
+    try:
+        sync_spy = _SyncTxSpy(db)
+        with pytest.raises(Exception):
+            ComplaintService().sync_email_connection(
+                db,
+                tenant_ctx=tenant_ctx,
+                connection_id=conn_id,
+                email_provider=EmailProvider(default_mock=failing_batch_adapter),
+                storage=sync_spy,  # type: ignore[arg-type]
+            )
+        assert sync_spy.put_tx_states == [False]
+        # Verify msg #1's pre-stored blob was cleaned up — zero orphan files in vault_fail_dir
+        assert [p for p in vault_fail_dir.rglob("*") if p.is_file()] == []
     finally:
         db.close()

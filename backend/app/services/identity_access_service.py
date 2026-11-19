@@ -315,6 +315,24 @@ class IdentityAccessService:
             session_factory=session_factory,
         )
 
+    def _unlock_expired_lockout_isolated(
+        self,
+        *,
+        user_id: uuid.UUID,
+        session_factory: sessionmaker[Session],
+    ) -> None:
+        with UnitOfWork(session_factory) as uow:
+            assert uow.session is not None
+            u = uow.session.get(User, user_id)
+            if (
+                u is not None
+                and u.account_status == UserAccountStatus.LOCKED.value
+                and u.email_verified_at is not None
+            ):
+                u.account_status = UserAccountStatus.ACTIVE.value
+                u.failed_login_attempts = 0
+                u.locked_until = None
+
     def _build_token_response(
         self,
         db: Session,
@@ -405,10 +423,15 @@ class IdentityAccessService:
                 raise AuthenticationError("Account is temporarily locked due to failed login attempts.")
             # Lockout expired: restore ACTIVE prior to password check if verified
             if user.email_verified_at is not None:
-                user.account_status = UserAccountStatus.ACTIVE.value
-                user.failed_login_attempts = 0
-                user.locked_until = None
-                db.commit()
+                user_id = user.id
+                db.rollback()
+                self._unlock_expired_lockout_isolated(
+                    user_id=user_id,
+                    session_factory=factory,
+                )
+                user = self._identity_repo.get_user_by_id(db, user_id)
+                if user is None:
+                    raise AuthenticationError("Invalid email or password.")
 
         if not user.password_hash or not verify_password(payload.password, user.password_hash):
             user_id = user.id

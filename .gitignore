@@ -21,7 +21,6 @@ BACKEND_IMPLEMENTATION_PROGRESS.md
 .env
 .env.*
 !.env.template
-
 # Backend environment files
 /backend/.env
 /backend/.env.example
@@ -71,6 +70,7 @@ pnpm-debug.log*
 # Uploaded files / runtime data
 # ============================
 backend/uploads/
+backend/vault_storage/
 *.db
 *.sqlite
 *.sqlite3

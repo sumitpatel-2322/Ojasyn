@@ -3,19 +3,27 @@ import time
 import uuid
 from typing import Callable, Dict, Optional
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 from app.core.database import UnitOfWork, get_session_factory
 from app.core.deps import TenantContext
 from app.core.logging import configure_logging
-from app.domain.enums import ActorType
+from app.domain.enums import (
+    ActorType,
+    MembershipStatus,
+    RoleAssignmentScopeType,
+    RoleAssignmentStatus,
+)
 from app.domain.rbac_catalog import WORKER_PERMISSIONS
-from app.models.domain.governance import OutboxEvent
+from app.models.domain.governance import Notification, OutboxEvent
 from app.repositories.governance_repo import OutboxRepository
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
+
+QA_FANOUT_ROLE_CODES = ("QA_HEAD", "QA_OFFICER", "QMS_HEAD")
 
 OutboxHandler = Callable[[Session, OutboxEvent, Optional[TenantContext]], None]
 ExternalOutboxHandler = Callable[[sessionmaker[Session], OutboxEvent, Optional[TenantContext]], None]
@@ -61,6 +69,106 @@ def _handle_notification_requested(
     )
 
 
+def fan_out_complaint_registered_notifications(
+    db: Session,
+    *,
+    organization_id: uuid.UUID,
+    complaint_id: uuid.UUID,
+    site_id: Optional[uuid.UUID] = None,
+    complaint_number: Optional[str] = None,
+    title: Optional[str] = None,
+) -> int:
+    """
+    Idempotently creates durable Notification records for active QA memberships
+    (QA_HEAD, QA_OFFICER, QMS_HEAD) scoped to the complaint's site or org-wide
+    within the tenant organization. Participates in the caller's UnitOfWork.
+    """
+    from app.models.domain.identity import MembershipRoleAssignment, OrganizationMembership, Role
+
+    stmt = (
+        select(OrganizationMembership.id)
+        .join(
+            MembershipRoleAssignment,
+            MembershipRoleAssignment.membership_id == OrganizationMembership.id,
+        )
+        .join(Role, Role.id == MembershipRoleAssignment.role_id)
+        .where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.membership_status == MembershipStatus.ACTIVE.value,
+            MembershipRoleAssignment.organization_id == organization_id,
+            MembershipRoleAssignment.status == RoleAssignmentStatus.ACTIVE.value,
+            Role.role_code.in_(QA_FANOUT_ROLE_CODES),
+        )
+    )
+    if site_id is not None:
+        stmt = stmt.where(
+            or_(
+                MembershipRoleAssignment.scope_type == RoleAssignmentScopeType.ORGANIZATION.value,
+                MembershipRoleAssignment.site_id == site_id,
+            )
+        )
+
+    recipient_ids = list(dict.fromkeys(db.scalars(stmt).all()))
+    if not recipient_ids:
+        return 0
+
+    existing_recipients = set(
+        db.scalars(
+            select(Notification.recipient_membership_id).where(
+                Notification.organization_id == organization_id,
+                Notification.event_type == "ComplaintRegistered",
+                Notification.aggregate_id == complaint_id,
+                Notification.recipient_membership_id.in_(recipient_ids),
+            )
+        ).all()
+    )
+
+    notif_service = NotificationService()
+    notif_title = f"New Complaint Registered: {complaint_number}" if complaint_number else "New Complaint Registered"
+    notif_body = title or "A new quality complaint has been registered and requires QA triage."
+
+    created = 0
+    for recipient_id in recipient_ids:
+        if recipient_id in existing_recipients:
+            continue
+        notif_service.create_in_tx(
+            db,
+            organization_id=organization_id,
+            recipient_membership_id=recipient_id,
+            event_type="ComplaintRegistered",
+            aggregate_type="complaints",
+            aggregate_id=complaint_id,
+            title=notif_title,
+            body=notif_body,
+        )
+        created += 1
+    return created
+
+
+def _handle_complaint_registered(
+    session_factory: sessionmaker[Session],
+    event: OutboxEvent,
+    tenant_ctx: Optional[TenantContext],
+) -> None:
+    if tenant_ctx is not None:
+        from app.models.domain.complaints import Complaint
+
+        with UnitOfWork(session_factory) as uow:
+            assert uow.session is not None
+            complaint = uow.session.get(Complaint, event.aggregate_id)
+            if complaint is not None and complaint.organization_id == tenant_ctx.organization_id:
+                fan_out_complaint_registered_notifications(
+                    uow.session,
+                    organization_id=tenant_ctx.organization_id,
+                    complaint_id=complaint.id,
+                    site_id=complaint.site_id,
+                    complaint_number=complaint.complaint_number,
+                    title=complaint.title,
+                )
+
+    _handle_complaint_async_triage(session_factory, event, tenant_ctx)
+
+
 def _handle_complaint_async_triage(
     session_factory: sessionmaker[Session],
     event: OutboxEvent,
@@ -69,6 +177,61 @@ def _handle_complaint_async_triage(
     from app.services.complaint_service import ComplaintService
 
     ComplaintService().handle_outbox_async_triage(session_factory, event, tenant_ctx)
+
+
+def _handle_outbound_communication(
+    session_factory: sessionmaker[Session],
+    event: OutboxEvent,
+    tenant_ctx: Optional[TenantContext],
+) -> None:
+    from app.services.complaint_service import ComplaintService
+
+    svc = ComplaintService()
+    handler = getattr(svc, "handle_outbox_outbound_communication", None)
+    if callable(handler):
+        handler(session_factory, event, tenant_ctx)
+        return
+    logger.warning(
+        "Outbound communication handler not yet available for event %s (%s:%s); skipping.",
+        event.event_type,
+        event.aggregate_type,
+        event.aggregate_id,
+    )
+
+
+def _handle_inbound_email(
+    session_factory: sessionmaker[Session],
+    event: OutboxEvent,
+    tenant_ctx: Optional[TenantContext],
+) -> None:
+    from app.services.complaint_service import ComplaintService
+
+    svc = ComplaintService()
+    handler = getattr(svc, "handle_outbox_inbound_email", None)
+    if callable(handler):
+        handler(session_factory, event, tenant_ctx)
+        return
+    logger.warning(
+        "Inbound email handler not yet available for event %s (%s:%s); skipping.",
+        event.event_type,
+        event.aggregate_type,
+        event.aggregate_id,
+    )
+
+
+def _handle_capa_overdue(
+    db: Session,
+    event: OutboxEvent,
+    tenant_ctx: Optional[TenantContext],
+) -> None:
+    from app.services.qms_action_service import QMSActionService
+
+    svc = QMSActionService()
+    handler = getattr(svc, "handle_outbox_capa_overdue", None)
+    if callable(handler):
+        handler(db, event, tenant_ctx)
+        return
+    _handle_domain_event_relay(db, event, tenant_ctx)
 
 
 def _handle_document_extraction(
@@ -156,6 +319,15 @@ _DEFAULT_DOMAIN_RELAY_EVENTS = (
     "DeviationCreated",
     "DeviationSubmittedForReview",
     "DeviationClosed",
+    "ComplaintInformationRequested",
+    "OutboundCommunicationSent",
+    "InboundEmailTriaged",
+    "CAPACreated",
+    "CAPAStatusChanged",
+    "CAPAActionCompleted",
+    "CAPAEffectivenessRecorded",
+    "CAPAClosed",
+    "CAPAOverdueNotified",
 )
 
 
@@ -184,7 +356,11 @@ class OutboxWorker:
         if handlers is not None:
             self._handlers: Dict[str, OutboxHandler] = dict(handlers)
         else:
-            self._handlers = {"NotificationRequested": _handle_notification_requested}
+            self._handlers = {
+                "NotificationRequested": _handle_notification_requested,
+                "CAPAOverdueCheckRequested": _handle_capa_overdue,
+                "CAPAOverdue": _handle_capa_overdue,
+            }
             for event_name in _DEFAULT_DOMAIN_RELAY_EVENTS:
                 self._handlers[event_name] = _handle_domain_event_relay
 
@@ -192,11 +368,14 @@ class OutboxWorker:
             dict(external_handlers)
             if external_handlers is not None
             else {
-                "ComplaintRegistered": _handle_complaint_async_triage,
+                "ComplaintRegistered": _handle_complaint_registered,
                 "ComplaintTriageRequested": _handle_complaint_async_triage,
                 "DocumentExtractionRequested": _handle_document_extraction,
                 "InvestigationRunRequested": _handle_investigation_run,
                 "InvestigationRunResumeRequested": _handle_investigation_run,
+                "OutboundCommunicationRequested": _handle_outbound_communication,
+                "InboundEmailReceived": _handle_inbound_email,
+                "InboundEmailProcessRequested": _handle_inbound_email,
             }
         )
 

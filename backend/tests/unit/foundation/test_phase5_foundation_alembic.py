@@ -34,9 +34,9 @@ def test_alembic_0006_chain_pg_sql_and_column_parity() -> None:
         "postgresql+psycopg://user:pass@localhost:5432/ojasyn",
     )
     sd = ScriptDirectory.from_config(cfg)
-    assert sd.get_heads() == ["0006_phase5_investigations"]
+    assert len(sd.get_heads()) == 1
 
-    revisions = list(sd.walk_revisions())
+    revisions = list(sd.walk_revisions(base="base", head="0006_phase5_investigations"))
     assert [r.revision for r in revisions] == [
         "0006_phase5_investigations",
         "0005_phase4_mfg_evidence",

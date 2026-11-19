@@ -23,6 +23,7 @@ from app.models.schemas.complaints import (
     ComplaintAssignmentResponse,
     ComplaintAttachmentResponse,
     ComplaintBatchLinkResponse,
+    ComplaintCloseRequest,
     ComplaintCommunicationCreateRequest,
     ComplaintCommunicationResponse,
     ComplaintDetailResponse,
@@ -435,3 +436,23 @@ def request_information(
         db, complaint_id=complaint_id, tenant_ctx=tenant_ctx, payload=payload
     )
     return ComplaintCommunicationResponse.model_validate(comm)
+
+
+@router.post("/complaints/{complaint_id}/close", response_model=ComplaintDetailResponse)
+def close_complaint(
+    request: Request,
+    complaint_id: uuid.UUID,
+    payload: ComplaintCloseRequest,
+    tenant_ctx: TenantContext = Depends(require_permission("complaint.close")),
+    db: Session = Depends(get_db),
+) -> ComplaintDetailResponse:
+    source_ip = request.client.host if request.client else None
+    complaint = _svc.close_complaint(
+        db,
+        complaint_id=complaint_id,
+        tenant_ctx=tenant_ctx,
+        payload=payload,
+        source_ip=source_ip,
+    )
+    return ComplaintDetailResponse.model_validate(complaint)
+

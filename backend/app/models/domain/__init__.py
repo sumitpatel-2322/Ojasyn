@@ -48,6 +48,16 @@ from app.models.domain.identity import (
     User,
     UserCredential,
 )
+from app.models.domain.investigations import (
+    EvidenceReference,
+    GeneratedReport,
+    Investigation,
+    InvestigationFinding,
+    InvestigationRun,
+    InvestigationStep,
+    RootCauseHypothesis,
+    SOPComplianceResult,
+)
 from app.models.domain.master_data import (
     ReferenceValue,
     UnitOfMeasure,
@@ -74,6 +84,7 @@ from app.models.domain.qc_equipment import (
     QCTestDefinition,
     QCTestResult,
 )
+from app.models.domain.qms_loop import Deviation
 from app.models.domain.sops import (
     SOP,
     SOPRevision,
@@ -172,6 +183,15 @@ __all__ = [
     "Equipment",
     "CalibrationRecord",
     "EquipmentUsage",
+    "Investigation",
+    "InvestigationRun",
+    "InvestigationStep",
+    "EvidenceReference",
+    "SOPComplianceResult",
+    "InvestigationFinding",
+    "RootCauseHypothesis",
+    "GeneratedReport",
+    "Deviation",
     "Notification",
     "OutboxEvent",
     "AuditEvent",

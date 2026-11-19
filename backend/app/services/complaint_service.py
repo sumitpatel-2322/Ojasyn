@@ -53,6 +53,7 @@ from app.models.domain.complaints import (
     CopilotSession,
     SLAClock,
 )
+from app.models.domain.governance import ApprovalRecord
 from app.models.domain.identity import OrganizationMembership
 from app.models.domain.products_materials import Product
 from app.models.domain.tenancy import Organization, Site
@@ -64,6 +65,7 @@ from app.models.schemas.complaints import (
     ComplaintAssignRequest,
     ComplaintAttachmentResponse,
     ComplaintClassificationResponse,
+    ComplaintCloseRequest,
     ComplaintCommunicationCreateRequest,
     ComplaintCommunicationResponse,
     ComplaintDetailResponse,
@@ -1040,8 +1042,177 @@ class ComplaintService:
                 reason=payload.notes,
                 after_state={"action": payload.action, "outcome": link.resolution_outcome},
             )
+            self._outbox.enqueue(
+                db,
+                organization_id=complaint.organization_id,
+                aggregate_type="complaint",
+                aggregate_id=complaint.id,
+                event_type="ComplaintBatchResolved",
+                payload_json={
+                    "complaint_id": str(complaint.id),
+                    "organization_id": str(complaint.organization_id),
+                    "batch_id": str(link.batch_id) if link.batch_id else None,
+                    "resolution_outcome": link.resolution_outcome,
+                },
+            )
+
+            # D2: Automatically resume any WAITING_FOR_HUMAN InvestigationRuns for this complaint
+            from app.services.investigation_service import InvestigationService
+
+            InvestigationService().resume_waiting_runs_for_complaint_in_tx(
+                db,
+                organization_id=tenant_ctx.organization_id,
+                complaint_id=complaint.id,
+                resolved_batch_id=link.batch_id,
+                resolution_outcome=link.resolution_outcome,
+                actor_user_id=tenant_ctx.user_id,
+            )
         db.refresh(link)
         return link
+
+    def close_complaint(
+        self,
+        db: Session,
+        *,
+        complaint_id: uuid.UUID,
+        tenant_ctx: TenantContext,
+        payload: ComplaintCloseRequest,
+        source_ip: Optional[str] = None,
+    ) -> Complaint:
+        """
+        Guarded complaint closure (`D7`):
+        - When any Investigation exists for this complaint, all investigations must be APPROVED/CLOSED
+          and at least one GeneratedReport must be APPROVED.
+        - Zero open mandatory Deviations may remain on the complaint or its investigations.
+        """
+        complaint = self._get_complaint_for_tenant_or_404(db, tenant_ctx, complaint_id)
+        assert_transition(
+            COMPLAINT_TRANSITIONS,
+            complaint.status,
+            ComplaintStatus.CLOSED.value,
+            entity_name="Complaint",
+        )
+        if tenant_ctx.membership_id is None:
+            raise PermissionDeniedError("Active organization membership required to close complaints.")
+
+        from app.domain.enums import InvestigationStatus, ReportStatus
+        from app.repositories.investigation_repo import InvestigationRepository
+        from app.repositories.qms_repo import QMSRepository
+
+        inv_repo = InvestigationRepository()
+        qms_repo = QMSRepository()
+        org_id = tenant_ctx.organization_id
+
+        investigations = inv_repo.list_investigations_for_complaint(db, org_id, complaint.id)
+        for inv in investigations:
+            if inv.status not in {InvestigationStatus.APPROVED.value, InvestigationStatus.CLOSED.value}:
+                raise ConflictError(
+                    f"Cannot close complaint: investigation {inv.investigation_number} is '{inv.status}' (must be APPROVED).",
+                    error_code="INVESTIGATION_NOT_APPROVED",
+                    details={"investigation_id": str(inv.id), "status": inv.status},
+                )
+            reports = inv_repo.list_reports_for_investigation(db, org_id, inv.id)
+            if not any(r.status == ReportStatus.APPROVED.value for r in reports):
+                raise ConflictError(
+                    f"Cannot close complaint: investigation {inv.investigation_number} has no APPROVED investigation report.",
+                    error_code="REPORT_NOT_APPROVED",
+                    details={"investigation_id": str(inv.id)},
+                )
+
+        open_mandatory_devs = qms_repo.list_open_mandatory_deviations_for_complaint(
+            db, org_id, complaint.id
+        )
+        if open_mandatory_devs:
+            raise ConflictError(
+                "Cannot close complaint while mandatory deviations remain open.",
+                error_code="OPEN_MANDATORY_DEVIATIONS_EXIST",
+                details={
+                    "open_deviation_numbers": [d.deviation_number for d in open_mandatory_devs],
+                    "open_deviation_ids": [str(d.id) for d in open_mandatory_devs],
+                },
+            )
+
+        now = datetime.now(timezone.utc)
+        with UnitOfWork(db):
+            verify_and_increment_version(complaint, payload.row_version)
+            prev_status = complaint.status
+
+            approval = ApprovalRecord(
+                organization_id=org_id,
+                entity_type="complaint",
+                entity_id=complaint.id,
+                approval_stage="COMPLAINT_CLOSURE",
+                decision="APPROVED",
+                approver_membership_id=tenant_ctx.membership_id,
+                decided_at=now,
+                comments=payload.closure_reason.strip(),
+            )
+            db.add(approval)
+            db.flush()
+
+            complaint.status = ComplaintStatus.CLOSED.value
+            complaint.closed_at = now
+            complaint.closure_reason = payload.closure_reason.strip()
+            complaint.updated_by_user_id = tenant_ctx.user_id
+
+            for inv in investigations:
+                if inv.status == InvestigationStatus.APPROVED.value:
+                    inv.status = InvestigationStatus.CLOSED.value
+                    inv.closed_at = now
+                    inv.closure_reason = payload.closure_reason.strip()
+                    inv.row_version += 1
+                    inv.updated_by_user_id = tenant_ctx.user_id
+
+            for clock in self._repo.get_active_sla_clocks(db, complaint.id):
+                clock.status = SLAStatus.MET.value
+                clock.completed_at = now
+
+            db.add(
+                ComplaintEvent(
+                    organization_id=org_id,
+                    complaint_id=complaint.id,
+                    event_type="COMPLAINT_CLOSED",
+                    from_status=prev_status,
+                    to_status=complaint.status,
+                    actor_user_id=tenant_ctx.user_id,
+                    actor_membership_id=tenant_ctx.membership_id,
+                    summary=f"Complaint closed: {payload.closure_reason.strip()[:200]}",
+                    details_json=(
+                        {"resolution_notes": payload.resolution_notes}
+                        if payload.resolution_notes
+                        else None
+                    ),
+                    occurred_at=now,
+                )
+            )
+            self._audit.record(
+                db,
+                organization_id=org_id,
+                site_id=complaint.site_id,
+                actor_type=ActorType.USER.value,
+                actor_id=tenant_ctx.user_id,
+                action="COMPLAINT_CLOSED",
+                entity_type="complaints",
+                entity_id=complaint.id,
+                reason=payload.closure_reason.strip(),
+                source_ip=source_ip,
+                before_state={"status": prev_status},
+                after_state={"status": complaint.status, "approval_record_id": str(approval.id)},
+            )
+            self._outbox.enqueue(
+                db,
+                organization_id=org_id,
+                aggregate_type="complaint",
+                aggregate_id=complaint.id,
+                event_type="ComplaintClosed",
+                payload_json={
+                    "complaint_id": str(complaint.id),
+                    "organization_id": str(org_id),
+                    "complaint_number": complaint.complaint_number,
+                },
+            )
+        db.refresh(complaint)
+        return complaint
 
     def add_communication(
         self,

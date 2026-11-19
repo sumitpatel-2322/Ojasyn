@@ -81,6 +81,16 @@ def _handle_document_extraction(
     DocumentControlService().run_extraction_job(session_factory, event, tenant_ctx)
 
 
+def _handle_investigation_run(
+    session_factory: sessionmaker[Session],
+    event: OutboxEvent,
+    tenant_ctx: Optional[TenantContext],
+) -> None:
+    from app.services.investigation_service import InvestigationService
+
+    InvestigationService().handle_outbox_investigation_run(session_factory, event, tenant_ctx)
+
+
 def _handle_domain_event_relay(
     db: Session,
     event: OutboxEvent,
@@ -134,6 +144,18 @@ _DEFAULT_DOMAIN_RELAY_EVENTS = (
     "SOPRevisionApproved",
     "SOPRevisionRejected",
     "SOPRevisionActivated",
+    "InvestigationOpened",
+    "InvestigationRunCompleted",
+    "InvestigationRunWaitingHuman",
+    "InvestigationRunFailed",
+    "InvestigationReviewed",
+    "ComplaintBatchResolved",
+    "ComplaintClosed",
+    "ReportGenerated",
+    "ReportReviewed",
+    "DeviationCreated",
+    "DeviationSubmittedForReview",
+    "DeviationClosed",
 )
 
 
@@ -173,6 +195,8 @@ class OutboxWorker:
                 "ComplaintRegistered": _handle_complaint_async_triage,
                 "ComplaintTriageRequested": _handle_complaint_async_triage,
                 "DocumentExtractionRequested": _handle_document_extraction,
+                "InvestigationRunRequested": _handle_investigation_run,
+                "InvestigationRunResumeRequested": _handle_investigation_run,
             }
         )
 

@@ -397,3 +397,39 @@ class CopilotSubmitRequest(BaseModel):
     site_id: Optional[uuid.UUID] = None
     source_channel: str = Field(default=ComplaintSource.WEBSITE.value, max_length=30)
     idempotency_key: Optional[str] = Field(default=None, max_length=120)
+
+
+class ComplaintCloseRequest(BaseModel):
+    row_version: int = Field(..., ge=1)
+    closure_reason: str = Field(..., min_length=3, max_length=2000)
+    resolution_notes: Optional[str] = Field(default=None, max_length=5000)
+
+
+# ---------------------------------------------------------------------------
+# Legacy compatibility schemas (used by app/api/complaints.py while
+# MOUNT_LEGACY_ROUTERS=true).
+# ---------------------------------------------------------------------------
+from app.models.complaint import ComplaintState  # noqa: E402
+
+
+class ChatRequest(BaseModel):
+    """Payload received from the legacy frontend."""
+
+    user_input: str
+    conversation_id: Optional[str] = None
+
+
+class ChatResponse(BaseModel):
+    """Response sent back to the legacy frontend."""
+
+    conversation_id: str
+    message: str
+    state: ComplaintState
+
+
+class ErrorResponse(BaseModel):
+    """Standardized legacy error response."""
+
+    detail: str
+
+
